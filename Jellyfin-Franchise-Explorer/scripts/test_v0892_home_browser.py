@@ -15,7 +15,8 @@ REPO = ROOT.parent
 assert 'id="fe-config-settings"' in BROWSE
 assert "'fe-config-settings').href" in BROWSE
 assert (REPO / "docs/Gost1o1-logo.png").is_file()
-README = (REPO / "README.md").read_text()
+README = (REPO / "docs/UPSTREAM_README.md").read_text()
+assert "Franchise Hub" in (REPO / "README.md").read_text(), "Independent README missing"
 assert 'src="docs/Gost1o1-logo.png"' in README
 for screenshot in (
     "docs/screenshots/user-guide/00-franchise-explorer-full-page.png",
