@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "status": "design_only",
+  "project": "Franchise Hub",
+  "target": "Jellyfin 12.2 Web",
+  "defaultMode": "chronological",
+  "canonicalOrder": {
+    "selection": "explicit_primaryChronologyRowId",
+    "fallbackToReleaseOrder": false,
+    "serverAuthoritative": true,
+    "clientQueueIsAuthoritative": false,
+    "progressOwner": "verified_server_event",
+    "allowNativeWatchedFlagsToDetermineNext": false
+  },
+  "identity": [
+    "franchiseId",
+    "orderId",
+    "orderRevision",
+    "slotId",
+    "occurrenceId",
+    "logicalMediaKey",
+    "jellyfinItemId",
+    "queueSnapshotId",
+    "sessionId",
+    "playbackInstanceId",
+    "userId"
+  ],
+  "modeDefinitions": [
+    {
+      "id": "chronological",
+      "source": "primary",
+      "tracksCanonical": true,
+      "requiresConfiguredOrder": true,
+      "selection": "none"
+    },
+    {
+      "id": "movies_only",
+      "source": "primary_filter",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": true,
+      "selection": "none"
+    },
+    {
+      "id": "series_only",
+      "source": "primary_filter",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": true,
+      "selection": "none"
+    },
+    {
+      "id": "complete_series",
+      "source": "jellyfin_series",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": false,
+      "selection": "seriesId"
+    },
+    {
+      "id": "selected_era",
+      "source": "primary_filter",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": true,
+      "selection": "eraId"
+    },
+    {
+      "id": "custom_selection",
+      "source": "explicit",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": false,
+      "selection": "itemSlots"
+    },
+    {
+      "id": "release_order",
+      "source": "explicit_configured_order",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": true,
+      "selection": "releaseOrderId"
+    },
+    {
+      "id": "watch_only",
+      "source": "explicit",
+      "tracksCanonical": false,
+      "requiresConfiguredOrder": false,
+      "selection": "itemId"
+    }
+  ],
+  "apiRoutes": [
+    {
+      "method": "GET",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/orders",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "GET",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/progress",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/resolve",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/playback/sessions",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/playback/sessions/{sessionId}/launch",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "GET",
+      "path": "/FranchiseHub/v1/playback/sessions/{sessionId}",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/playback/sessions/{sessionId}/cancel",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/playback/sessions/{sessionId}/takeover",
+      "auth": "viewer",
+      "canonicalMutation": false
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/progress/restart",
+      "auth": "viewer",
+      "canonicalMutation": true,
+      "explicitIntent": true
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/progress/credit",
+      "auth": "viewer",
+      "canonicalMutation": true,
+      "explicitIntent": true
+    },
+    {
+      "method": "POST",
+      "path": "/FranchiseHub/v1/franchises/{franchiseId}/progress/reconcile",
+      "auth": "viewer",
+      "canonicalMutation": true,
+      "explicitIntent": true
+    },
+    {
+      "method": "GET",
+      "path": "/FranchiseHub/v1/diagnostics",
+      "auth": "viewer",
+      "canonicalMutation": false
+    }
+  ],
+  "sessionLifecycle": {
+    "states": [
+      "prepared",
+      "dispatching",
+      "awaiting_verification",
+      "playing",
+      "paused",
+      "advancing",
+      "completed",
+      "failed",
+      "cancelled"
+    ],
+    "transitions": {
+      "prepared": [
+        "dispatching",
+        "failed",
+        "cancelled"
+      ],
+      "dispatching": [
+        "awaiting_verification",
+        "failed",
+        "cancelled"
+      ],
+      "awaiting_verification": [
+        "playing",
+        "failed",
+        "cancelled"
+      ],
+      "playing": [
+        "paused",
+        "advancing",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "paused": [
+        "awaiting_verification",
+        "cancelled",
+        "failed"
+      ],
+      "advancing": [
+        "awaiting_verification",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "completed": [],
+      "failed": [],
+      "cancelled": []
+    },
+    "verifiedStartRequired": true,
+    "dispatchConfirmsPlayback": false,
+    "completionIdempotent": true,
+    "completedAndFailedAreTerminal": true,
+    "requiresOwnerLease": true
+  },
+  "progressPolicy": {
+    "canonicalKey": [
+      "userId",
+      "franchiseId",
+      "orderId"
+    ],
+    "independentModeCanMutateCanonical": false,
+    "completionKey": [
+      "userId",
+      "franchiseId",
+      "orderId",
+      "occurrenceId"
+    ],
+    "progressChangesOnlyOnVerifiedJellyfinEventOrExplicitAuthorizedAction": true,
+    "duplicateMediaOccurrencesDistinct": true
+  },
+  "httpErrors": {
+    "staleRevision": 409,
+    "ambiguousOccurrence": 409,
+    "activeSessionConflict": 409,
+    "unplayableSelection": 422,
+    "playbackUnverified": 424,
+    "capabilityUnavailable": 503
+  },
+  "compatibility": {
+    "upstreamInput": "schemaVersion:1 JSON",
+    "upstreamOutput": "schemaVersion:1 JSON",
+    "nativeOutput": "versioned package with optional artwork and per-user progress",
+    "oldRuntimeRoutes": "FranchiseExplorer",
+    "newRuntimeRoutes": "FranchiseHub/v1",
+    "dualInstallationAllowed": false
+  },
+  "fixture": {
+    "canonical": [
+      {
+        "id": "movie-a",
+        "occurrenceId": "occ-film-a-1",
+        "slotId": "slot-film-a-1",
+        "kind": "Movie",
+        "era": "era-1",
+        "series": null,
+        "jellyfinItemId": "media-film-a"
+      },
+      {
+        "id": "e1",
+        "occurrenceId": "occ-series-a-e1",
+        "slotId": "slot-series-a-1",
+        "kind": "Episode",
+        "era": "era-2",
+        "series": "series-a",
+        "jellyfinItemId": "media-e1"
+      },
+      {
+        "id": "e2",
+        "occurrenceId": "occ-series-a-e2",
+        "slotId": "slot-series-a-1",
+        "kind": "Episode",
+        "era": "era-2",
+        "series": "series-a",
+        "jellyfinItemId": "media-e2"
+      },
+      {
+        "id": "movie-b",
+        "occurrenceId": "occ-film-b-1",
+        "slotId": "slot-film-b-1",
+        "kind": "Movie",
+        "era": "era-2",
+        "series": null,
+        "jellyfinItemId": "media-film-b"
+      },
+      {
+        "id": "e3",
+        "occurrenceId": "occ-series-a-e3",
+        "slotId": "slot-series-a-2",
+        "kind": "Episode",
+        "era": "era-3",
+        "series": "series-a",
+        "jellyfinItemId": "media-e3"
+      }
+    ],
+    "completeSeriesExpansion": [
+      "e1",
+      "e2",
+      "e3",
+      "e4"
+    ],
+    "configuredReleaseOrder": [
+      "movie-b",
+      "movie-a",
+      "e1",
+      "e2",
+      "e3"
+    ],
+    "customSelection": [
+      "movie-b",
+      "e2",
+      "movie-a"
+    ],
+    "singleWatch": "e2",
+    "selectedEra": "era-2",
+    "expected": {
+      "chronological": [
+        "movie-a",
+        "e1",
+        "e2",
+        "movie-b",
+        "e3"
+      ],
+      "movies_only": [
+        "movie-a",
+        "movie-b"
+      ],
+      "series_only": [
+        "e1",
+        "e2",
+        "e3"
+      ],
+      "complete_series": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+      ],
+      "selected_era": [
+        "e1",
+        "e2",
+        "movie-b"
+      ],
+      "custom_selection": [
+        "movie-b",
+        "e2",
+        "movie-a"
+      ],
+      "release_order": [
+        "movie-b",
+        "movie-a",
+        "e1",
+        "e2",
+        "e3"
+      ],
+      "watch_only": [
+        "e2"
+      ]
+    }
+  },
+  "designAcceptance": [
+    "same-canonical-preview-home-and-browse",
+    "no-progress-on-unverified-start",
+    "no-progress-for-alternative-modes",
+    "same-media-distinct-occurrences",
+    "exact-provider-identity-recovery",
+    "revision-conflict-no-silent-reset",
+    "concurrent-session-lease-fencing",
+    "idempotent-completion",
+    "permission-rechecked-before-autonext",
+    "legacy-bidirectional-import-export-with-loss-report"
+  ]
+}
