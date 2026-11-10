@@ -82,7 +82,7 @@ assert calc["chronological"].index("movie-b") > calc["chronological"].index("e2"
 assert calc["custom_selection"] != [v for v in ids if v in calc["custom_selection"]]
 # A reference progress simulation (not plugin runtime) proves the spec forbids
 # canonical advancement for all alternate modes.
-cursor = {"current": "e2", "completed": ("movie-a", "e1"), "ticks": 320000000}
+cursor = {"current": "e2", "completed": ["movie-a", "e1"], "ticks": 320000000}
 original = json.dumps(cursor, sort_keys=True)
 for mode in modes:
     trial = json.loads(original)
