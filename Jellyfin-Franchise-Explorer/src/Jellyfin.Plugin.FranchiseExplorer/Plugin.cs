@@ -15,7 +15,7 @@ namespace Jellyfin.Plugin.FranchiseExplorer;
 /// </summary>
 public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
-    public static readonly Guid PluginId = Guid.Parse("6bc7820b-7c6d-4e64-a139-dfb90b8d6f42");
+    public static readonly Guid PluginId = Guid.Parse("4f0ea498-68ea-42ce-a010-bd35b182299d");
 
     public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
         : base(applicationPaths, xmlSerializer)
@@ -25,12 +25,12 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public static Plugin? Instance { get; private set; }
 
-    public override string Name => "Franchise Explorer";
+    public override string Name => "Franchise Hub";
 
     public override Guid Id => PluginId;
 
     public override string Description =>
-        "Experimental virtual franchises, timeline queue preview, and independent per-user viewing progress.";
+        "Independent virtual franchise browsing, chronological playback and per-user progress (development preview).";
 
     public override void UpdateConfiguration(BasePluginConfiguration configuration)
     {

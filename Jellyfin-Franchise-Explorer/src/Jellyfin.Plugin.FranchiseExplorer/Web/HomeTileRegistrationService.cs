@@ -32,36 +32,10 @@ public sealed class HomeTileRegistrationService : IHostedService, IDisposable
     // Script IDs are stable within a UI generation, not forever. Injector and
     // Jellyfin Web can cache the previous script despite a DLL replacement.
     // A new ID lets this release load the updated home and menu integration.
-    private const string CurrentScriptId = "jellyfin-franchise-explorer-my-media-v08928";
-    private static readonly string[] LegacyScriptIds =
-    {
-        "jellyfin-franchise-explorer-my-media-v08927",
-        "jellyfin-franchise-explorer-my-media-v08926",
-        "jellyfin-franchise-explorer-my-media-v08925",
-        "jellyfin-franchise-explorer-my-media-v08924",
-        "jellyfin-franchise-explorer-my-media-v08923",
-        "jellyfin-franchise-explorer-my-media-v08922",
-        "jellyfin-franchise-explorer-my-media-v08921",
-        "jellyfin-franchise-explorer-my-media-v08920",
-        "jellyfin-franchise-explorer-my-media-v08919",
-        "jellyfin-franchise-explorer-my-media-v08918",
-        "jellyfin-franchise-explorer-my-media-v08917",
-        "jellyfin-franchise-explorer-my-media-v08916",
-        "jellyfin-franchise-explorer-my-media-v08915",
-        "jellyfin-franchise-explorer-my-media-v08914",
-        "jellyfin-franchise-explorer-my-media-v08913",
-        "jellyfin-franchise-explorer-my-media-v08912",
-        "jellyfin-franchise-explorer-my-media-v08911",
-        "jellyfin-franchise-explorer-my-media-v08910",
-        "jellyfin-franchise-explorer-my-media-v0899",
-        "jellyfin-franchise-explorer-my-media-v0898",
-        "jellyfin-franchise-explorer-my-media-v0897",
-        "jellyfin-franchise-explorer-my-media-v0896",
-        "jellyfin-franchise-explorer-my-media-v0895",
-        "jellyfin-franchise-explorer-my-media-v0894",
-        "jellyfin-franchise-explorer-my-media-v0893",
-        "jellyfin-franchise-explorer-my-media-v1"
-    };
+    private const string CurrentScriptId = "jellyfin-franchise-hub-my-media-v0100";
+    // This is a new plugin identity: NEVER unregister scripts belonging to upstream.
+    // Only add our own previous IDs here after future Franchise Hub releases.
+    private static readonly string[] LegacyScriptIds = Array.Empty<string>();
     private readonly ILogger<HomeTileRegistrationService> _logger;
     private readonly CancellationTokenSource _stopping = new();
     private Task? _registrationTask;
@@ -109,13 +83,13 @@ public sealed class HomeTileRegistrationService : IHostedService, IDisposable
                 if (TryRegister())
                 {
                     _logger.LogInformation(
-                        "Franchise Explorer: My Media web tile registered with the optional JavaScript Injector plugin.");
+                        "Franchise Hub: My Media web tile registered with the optional JavaScript Injector plugin.");
                     return;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Franchise Explorer: optional My Media tile registration attempt failed.");
+                _logger.LogWarning(ex, "Franchise Hub: optional My Media tile registration attempt failed.");
             }
 
             try
@@ -129,7 +103,7 @@ public sealed class HomeTileRegistrationService : IHostedService, IDisposable
         }
 
         _logger.LogInformation(
-            "Franchise Explorer: optional JavaScript Injector integration unavailable; the standalone browser remains accessible. " +
+            "Franchise Hub: optional JavaScript Injector integration unavailable; the standalone browser remains accessible. " +
             "Install JavaScript Injector and restart Jellyfin to add the web-only My Media card.");
     }
 
@@ -179,14 +153,14 @@ public sealed class HomeTileRegistrationService : IHostedService, IDisposable
         string json = JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["id"] = CurrentScriptId,
-            ["name"] = "Franchise Explorer - My Media tile",
+            ["name"] = "Franchise Hub - My Media tile",
             ["script"] = script,
             ["module"] = false,
             ["enabled"] = true,
             ["requiresAuthentication"] = false,
             ["pluginId"] = global::Jellyfin.Plugin.FranchiseExplorer.Plugin.PluginId.ToString(),
-            ["pluginName"] = "Franchise Explorer",
-            ["pluginVersion"] = "0.8.9.28"
+            ["pluginName"] = "Franchise Hub",
+            ["pluginVersion"] = "0.1.0.0"
         });
 
         object? payload = parse.Invoke(null, new object[] { json });
@@ -209,7 +183,7 @@ public sealed class HomeTileRegistrationService : IHostedService, IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Franchise Explorer: previous My Media Injector script {LegacyScriptId} could not be retired; check for duplicate plugin scripts.", legacyId);
+                    _logger.LogWarning(ex, "Franchise Hub: previous My Media Injector script {LegacyScriptId} could not be retired; check for duplicate plugin scripts.", legacyId);
                 }
             }
         }

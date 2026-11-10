@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<title>Franchise Explorer · Jellyfin</title>
+<title>Franchise Hub · Jellyfin</title>
 <style>
 :root{color-scheme:dark;--bg:#101114;--surface:#1b1e24;--line:#343c48;--text:#f4f7fb;--muted:#bac2cc;--accent:#09b1c5;--radius:14px;font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
 *,*::before,*::after{box-sizing:border-box}
@@ -172,8 +172,8 @@ h1{font-size:clamp(1.65rem,3.6vw,3.6rem);line-height:1.13;margin:9px 0 8px;lette
 </head>
 <body>
 <header class="top">
-  <a id="brand-home" class="brand" href="/FranchiseExplorer/Browse" title="Return to Your franchises" aria-label="Franchise Explorer — return to Your franchises"><span class="brand-mark" aria-hidden="true">F</span><span id="brand-title" class="brand-title">Franchise Explorer</span></a>
-  <nav class="actions" aria-label="Navigation"><a id="fe-config-settings" class="btn btn-lite" href="#" title="Franchise Explorer Settings (Jellyfin administrator required)" aria-label="Franchise Explorer Settings">⚙ <span class="desktop-word">Settings</span></a><a id="return-jellyfin" class="btn btn-lite" href="#">← <span class="desktop-word">Jellyfin</span></a><button class="btn btn-lite" id="browse-back" title="Back to parent" type="button">↑ <span class="desktop-word">Back</span></button></nav>
+  <a id="brand-home" class="brand" href="/FranchiseExplorer/Browse" title="Return to Your franchises" aria-label="Franchise Hub — return to Your franchises"><span class="brand-mark" aria-hidden="true">F</span><span id="brand-title" class="brand-title">Franchise Hub</span></a>
+  <nav class="actions" aria-label="Navigation"><a id="fe-config-settings" class="btn btn-lite" href="#" title="Franchise Hub Settings (Jellyfin administrator required)" aria-label="Franchise Hub Settings">⚙ <span class="desktop-word">Settings</span></a><a id="return-jellyfin" class="btn btn-lite" href="#">← <span class="desktop-word">Jellyfin</span></a><button class="btn btn-lite" id="browse-back" title="Back to parent" type="button">↑ <span class="desktop-word">Back</span></button></nav>
 </header>
 <main>
   <nav id="breadcrumbs" class="crumbs" aria-label="Breadcrumbs"></nav>
@@ -622,7 +622,7 @@ h1{font-size:clamp(1.65rem,3.6vw,3.6rem);line-height:1.13;margin:9px 0 8px;lette
   async function render(){
     const ticket=++renderSerial;stopBackdropPlayers();current=hashGroup();shownCards=[];if(timeline)timeline.decorations=[];
     const selected=nodeById(current),title=selected?selected.name:(catalog.title||'Franchises');
-    text($('brand-title'),'Franchise Explorer');document.title=title+' · Franchise Explorer';drawBreadcrumbs(selected);
+    text($('brand-title'),'Franchise Hub');document.title=title+' · Franchise Hub';drawBreadcrumbs(selected);
     // The root is the library itself: show actual franchise posters immediately.
     // Keep the rich artwork hero for a selected franchise only.
     document.querySelector('.hero').classList.toggle('hidden',!selected);
