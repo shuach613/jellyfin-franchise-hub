@@ -1,0 +1,72 @@
+name: Restore pinned upstream baseline screenshots
+
+# One-time bootstrap helper. This restores 12 documentation-only PNGs that
+# exceed GitHub's Contents API direct-file limit. It does not modify source code.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/restore-baseline-assets.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore-doc-screenshots:
+    if: github.repository == 'shuach613/jellyfin-franchise-hub'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out independent repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Retrieve exact upstream v0.8.9.28 snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/franchise-upstream"
+          git -C "$RUNNER_TEMP/franchise-upstream" remote add origin https://github.com/Gost1o1/Jellyfin-Franchise-Explorer.git
+          git -C "$RUNNER_TEMP/franchise-upstream" fetch --depth 1 origin e02be642c9a89e66cfd85f458e6fe0bbebd3714c
+          git -C "$RUNNER_TEMP/franchise-upstream" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/franchise-upstream" rev-parse HEAD)" = e02be642c9a89e66cfd85f458e6fe0bbebd3714c
+
+      - name: Restore missing original screenshots and verify their Git blob hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            Jellyfin-Franchise-Explorer/docs/franchise-explorer-preview.png
+            Jellyfin-Franchise-Explorer/docs/screenshots/02-franchises-library.png
+            Jellyfin-Franchise-Explorer/docs/screenshots/03-marvel-franchise.png
+            Jellyfin-Franchise-Explorer/docs/screenshots/04-chronological-watch-order.png
+            Jellyfin-Franchise-Explorer/docs/screenshots/05-jellyfin-home-integration.png
+            docs/franchise-explorer-preview.png
+            docs/screenshots/02-franchises-library.png
+            docs/screenshots/03-marvel-franchise.png
+            docs/screenshots/04-chronological-watch-order.png
+            docs/screenshots/05-jellyfin-home-integration.png
+            docs/screenshots/user-guide/00-franchise-explorer-full-page.png
+            docs/screenshots/user-guide/01-jellyfin-home.png
+          )
+          for file in "${files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              mkdir -p "$(dirname "$file")"
+              cp "$RUNNER_TEMP/franchise-upstream/$file" "$file"
+            fi
+            expected="$(git -C "$RUNNER_TEMP/franchise-upstream" rev-parse "HEAD:$file")"
+            actual="$(git hash-object "$file")"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error file=$file::Upstream content mismatch: expected $expected, got $actual"
+              exit 1
+            fi
+          done
+          git add -- "${files[@]}"
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "baseline: restore original upstream documentation screenshots [skip ci]"
+            git push origin HEAD:main
+          fi
