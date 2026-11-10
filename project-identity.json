@@ -1,0 +1,10 @@
+{
+  "name": "Franchise Hub",
+  "pluginId": "4f0ea498-68ea-42ce-a010-bd35b182299d",
+  "assemblyName": "Jellyfin.Plugin.FranchiseHub",
+  "version": "0.1.0.0",
+  "scriptId": "jellyfin-franchise-hub-my-media-v0100",
+  "repository": "shuach613/jellyfin-franchise-hub",
+  "upstreamVersion": "0.8.9.28",
+  "upstreamCommit": "e02be642c9a89e66cfd85f458e6fe0bbebd3714c"
+}

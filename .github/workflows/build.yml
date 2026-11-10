@@ -1,7 +1,7 @@
-name: Build and validate (no release)
+name: Franchise Hub — build and validate (no release)
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -20,6 +20,7 @@ jobs:
         working-directory: Jellyfin-Franchise-Explorer
         run: |
           python3 scripts/check_repo.py
+          python3 scripts/check_version.py 0.1.0.0
           python3 scripts/build_settings_page.py --check
           node scripts/test_settings_core.js
           node scripts/test_episode_formats.js
@@ -65,8 +66,8 @@ jobs:
       - name: Upload build artifact (not a release)
         uses: actions/upload-artifact@v6
         with:
-          name: franchise-explorer-unverified-dll
-          path: Jellyfin-Franchise-Explorer/src/Jellyfin.Plugin.FranchiseExplorer/bin/Release/net10.0/Jellyfin.Plugin.FranchiseExplorer.dll
+          name: franchise-hub-unverified-dll
+          path: Jellyfin-Franchise-Explorer/src/Jellyfin.Plugin.FranchiseExplorer/bin/Release/net10.0/Jellyfin.Plugin.FranchiseHub.dll
           if-no-files-found: error
           retention-days: 14
   ui-browser:

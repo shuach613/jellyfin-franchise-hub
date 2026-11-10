@@ -15,6 +15,10 @@ This repository is an independently maintained, personal, noncommercial derivati
 
 The upstream project is licensed under the custom **Personal and Noncommercial Use License (Draft)**, version 0.1. The copied source retains its complete original LICENSE files and notices. All derivative changes must respect the permission, noncommercial restriction, preservation/attribution and modification-notice requirements. This repository is not endorsed by the upstream authors.
 
+## Step 2 — independent identity
+
+Franchise Hub now has a distinct Jellyfin plugin GUID, DLL/assembly name, injector script registration, unpublished catalog and version `0.1.0.0`. The original upstream snapshot remains frozen on `baseline/upstream-v0.8.9.28`. The original namespace and /FranchiseExplorer routes remain unchanged until the later compatibility and migration steps; this development build must not run simultaneously with upstream.
+
 ## Status
 
 This is a **frozen upstream baseline only**. The original plugin GUID, product identity, build/release references and Jellyfin injection identifiers are intentionally unchanged until **Step 2 — Independent Plugin Identity and Versioning**. Do not install the upstream plugin and this unmodified snapshot as separate active plugins on the same Jellyfin instance.

@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
-"""Fail closed when requested release and active deployment markers differ."""
+"""Ensure the independent plugin's version/identity is consistent before packaging."""
+import json
 import pathlib
 import re
 import sys
 
-version = sys.argv[1] if len(sys.argv) > 1 else ''
-if not re.fullmatch(r'\d+\.\d+\.\d+\.\d+', version):
-    sys.exit('Expected a 4-component numerical release version.')
 root = pathlib.Path(__file__).resolve().parents[1]
-project = root / 'src/Jellyfin.Plugin.FranchiseExplorer'
-script_id = 'jellyfin-franchise-explorer-my-media-v' + version.replace('.', '')
+repository = root.parent
+identity = json.loads((repository / "project-identity.json").read_text(encoding="utf-8"))
+version = sys.argv[1] if len(sys.argv) > 1 else identity["version"]
+if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", version) or version != identity["version"]:
+    sys.exit("Expected the four-component version from project-identity.json.")
+project = root / "src/Jellyfin.Plugin.FranchiseExplorer"
+def require(path, tokens):
+    s = path.read_text(encoding="utf-8")
+    for needle in tokens:
+        if needle not in s:
+            sys.exit(f"Missing independent identity marker in {path}: {needle}")
 
-
-def require(path, markers):
-    content = path.read_text(encoding='utf-8')
-    for marker in markers:
-        if marker not in content:
-            sys.exit(f'Release version marker missing in {path.name}: {marker}. Refusing to publish.')
-
-
-for field in ('Version', 'AssemblyVersion', 'FileVersion'):
-    require(project / 'Jellyfin.Plugin.FranchiseExplorer.csproj', [f'<{field}>{version}</{field}>'])
-require(project / 'Api/FranchiseBrowseController.cs', [f'version = "{version}"'])
-require(project / 'Web/HomeTileRegistrationService.cs', [
-    f'CurrentScriptId = "{script_id}"', f'["pluginVersion"] = "{version}"',
-])
-require(project / 'Web/franchise-my-media.js', [
-    f"window.__franchiseExplorerUiVersion = '{version}'",
-    f"window.__franchiseTimelineHomeVersion = '{version}'",
-    f"window.__franchiseAutoplayBridgeVersion='{version}'",
-    f"setAttribute('data-fe-version','{version}')",
-    f"CACHE_PREFIX = 'fe-franchise-home-v{version.replace('.', '')}:'",
-])
-require(project / 'Configuration/configPage.html', [f'<span class="version">v{version}</span>'])
-require(root.parent / '.github/workflows/release.yml', [f"default: '{version}'"])
-require(root.parent / 'README.md', [f'v{version}', script_id])
-print('Version matches:', version)
+csproj = project / "Jellyfin.Plugin.FranchiseExplorer.csproj"
+require(csproj, [f"<{key}>{version}</{key}>" for key in ("Version","AssemblyVersion","FileVersion")] + [f"<AssemblyName>{identity['assemblyName']}</AssemblyName>"])
+require(project / "Plugin.cs", [identity["pluginId"], f'public override string Name => "{identity["name"]}";'])
+require(project / "Web/HomeTileRegistrationService.cs", [f'CurrentScriptId = "{identity["scriptId"]}"',f'["pluginVersion"] = "{version}"',f'["pluginName"] = "{identity["name"]}"'])
+require(project / "Api/FranchiseBrowseController.cs", [f'version = "{version}"'])
+require(project / "Web/franchise-my-media.js", [f"window.__franchiseHubUiVersion = '{version}'",f"window.__franchiseTimelineHomeVersion = '{version}'",f"window.__franchiseAutoplayBridgeVersion='{version}'",f"setAttribute('data-fe-version','{version}')",f"CACHE_PREFIX = 'fe-franchise-home-v{version.replace('.','')}:'"])
+require(project / "Configuration/configPage.html", [f'<span class="version">v{version}</span>'])
+require(repository / "README.md", [version,identity["scriptId"]])
+for path in (repository / "manifest.json", root / "manifest.json"):
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if len(manifest) != 1 or manifest[0]["guid"] != identity["pluginId"] or manifest[0]["name"] != identity["name"] or manifest[0]["owner"] != "shuach613":
+        sys.exit(f"Catalog identity is incorrect: {path}")
+    for ver in manifest[0]["versions"]:
+        if identity["repository"] not in ver["sourceUrl"]:
+            sys.exit("Catalog references a foreign release. Publishing refused.")
+release = (repository / ".github/workflows/release.yml").read_text(encoding="utf-8")
+if "publishing disabled until Step 16" not in release or "exit 1" not in release:
+    sys.exit("Independent release publishing is not safely disabled.")
+print("Independent Franchise Hub identity/version verified:", version)
