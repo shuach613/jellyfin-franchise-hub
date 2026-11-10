@@ -22,6 +22,9 @@ jobs:
           python3 scripts/check_repo.py
           python3 scripts/check_version.py 0.1.0.0
           python3 scripts/build_settings_page.py --check
+          python3 scripts/test_step3_feature_contracts.py
+          node scripts/test_feature_parity_fixture.js
+          python3 scripts/test_full_library_row_contract.py
           node scripts/test_settings_core.js
           node scripts/test_episode_formats.js
           python3 scripts/check_repository_completeness.py
