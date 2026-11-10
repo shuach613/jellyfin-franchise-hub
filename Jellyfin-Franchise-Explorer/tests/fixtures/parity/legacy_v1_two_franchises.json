@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 1,
+  "NavigationLabel": "Franchises",
+  "ConfigurationRevision": 7,
+  "AutoFranchises": {
+    "Enabled": false
+  },
+  "MediaRecovery": {
+    "Enabled": true
+  },
+  "ImdbLists": [],
+  "Nodes": [
+    {
+      "Id": "00000001-1111-4111-8111-111111111111",
+      "ParentId": "",
+      "Name": "Chronology Lab",
+      "NodeType": "Franchise",
+      "SortOrder": 0,
+      "Overview": "Synthetic franchise for legacy import and viewing-order regression tests.",
+      "Artwork": {
+        "PrimaryUrl": "/Items/00000301-1111-4111-8111-111111111111/Images/Primary"
+      },
+      "FutureNodeField": "preserve-me"
+    },
+    {
+      "Id": "00000002-1111-4111-8111-111111111111",
+      "ParentId": "00000001-1111-4111-8111-111111111111",
+      "Name": "Era Alpha",
+      "NodeType": "Era",
+      "SortOrder": 0
+    },
+    {
+      "Id": "00000003-1111-4111-8111-111111111111",
+      "ParentId": "",
+      "Name": "Independent Franchise",
+      "NodeType": "Franchise",
+      "SortOrder": 1
+    }
+  ],
+  "MediaLinks": [
+    {
+      "Id": "00000010-1111-4111-8111-111111111111",
+      "NodeId": "00000002-1111-4111-8111-111111111111",
+      "JellyfinItemId": "00000301-1111-4111-8111-111111111111",
+      "DisplayName": "Film One",
+      "ItemType": "Movie",
+      "ViewingOrder": "Custom",
+      "Position": 0,
+      "RangeMode": "Full",
+      "StartSeason": 0,
+      "EndSeason": 0,
+      "StartEpisode": 0,
+      "EndEpisode": 0
+    },
+    {
+      "Id": "00000011-1111-4111-8111-111111111111",
+      "NodeId": "00000002-1111-4111-8111-111111111111",
+      "JellyfinItemId": "00000302-1111-4111-8111-111111111111",
+      "DisplayName": "Series Alpha S1E1–2",
+      "ItemType": "Series",
+      "ViewingOrder": "Custom",
+      "Position": 1,
+      "RangeMode": "Episodes",
+      "StartSeason": 1,
+      "EndSeason": 1,
+      "StartEpisode": 1,
+      "EndEpisode": 2,
+      "FutureLinkField": "keep"
+    },
+    {
+      "Id": "00000012-1111-4111-8111-111111111111",
+      "NodeId": "00000002-1111-4111-8111-111111111111",
+      "JellyfinItemId": "00000303-1111-4111-8111-111111111111",
+      "DisplayName": "Film Two",
+      "ItemType": "Movie",
+      "ViewingOrder": "Custom",
+      "Position": 2,
+      "RangeMode": "Full",
+      "StartSeason": 0,
+      "EndSeason": 0,
+      "StartEpisode": 0,
+      "EndEpisode": 0
+    },
+    {
+      "Id": "00000013-1111-4111-8111-111111111111",
+      "NodeId": "00000002-1111-4111-8111-111111111111",
+      "JellyfinItemId": "00000302-1111-4111-8111-111111111111",
+      "DisplayName": "Series Alpha S1E3",
+      "ItemType": "Series",
+      "ViewingOrder": "Custom",
+      "Position": 3,
+      "RangeMode": "Episodes",
+      "StartSeason": 1,
+      "EndSeason": 1,
+      "StartEpisode": 3,
+      "EndEpisode": 3
+    },
+    {
+      "Id": "00000014-1111-4111-8111-111111111111",
+      "NodeId": "00000003-1111-4111-8111-111111111111",
+      "JellyfinItemId": "00000304-1111-4111-8111-111111111111",
+      "DisplayName": "Another Franchise Film",
+      "ItemType": "Movie",
+      "ViewingOrder": "Custom",
+      "Position": 4,
+      "RangeMode": "Full",
+      "StartSeason": 0,
+      "EndSeason": 0,
+      "StartEpisode": 0,
+      "EndEpisode": 0
+    }
+  ],
+  "Rows": [
+    {
+      "Id": "00000201-1111-4111-8111-111111111111",
+      "ParentNodeId": "00000001-1111-4111-8111-111111111111",
+      "Name": "Chronological Order",
+      "RowType": "Timeline",
+      "Category": "Chronological Order",
+      "SortOrder": 201,
+      "NodeIds": [],
+      "MediaLinkIds": [
+        "00000010-1111-4111-8111-111111111111",
+        "00000011-1111-4111-8111-111111111111",
+        "00000012-1111-4111-8111-111111111111",
+        "00000013-1111-4111-8111-111111111111"
+      ],
+      "Items": [
+        {
+          "Id": "00000020-1111-4111-8111-111111111111",
+          "JellyfinItemId": "00000305-1111-4111-8111-111111111111",
+          "DisplayName": "Series Beta S2E1–2",
+          "ItemType": "Series",
+          "RangeMode": "Episodes",
+          "StartSeason": 2,
+          "EndSeason": 2,
+          "StartEpisode": 1,
+          "EndEpisode": 2
+        }
+      ],
+      "MediaOrder": [
+        "00000010-1111-4111-8111-111111111111",
+        "00000011-1111-4111-8111-111111111111",
+        "00000012-1111-4111-8111-111111111111",
+        "00000020-1111-4111-8111-111111111111",
+        "00000013-1111-4111-8111-111111111111"
+      ],
+      "FutureRowField": "preserve"
+    },
+    {
+      "Id": "00000202-1111-4111-8111-111111111111",
+      "ParentNodeId": "00000001-1111-4111-8111-111111111111",
+      "Name": "Movies Only Shelf",
+      "RowType": "Media",
+      "Category": "Movies",
+      "SortOrder": 202,
+      "NodeIds": [],
+      "MediaLinkIds": [
+        "00000010-1111-4111-8111-111111111111",
+        "00000012-1111-4111-8111-111111111111"
+      ],
+      "Items": [],
+      "MediaOrder": [
+        "00000012-1111-4111-8111-111111111111",
+        "00000010-1111-4111-8111-111111111111"
+      ]
+    },
+    {
+      "Id": "00000203-1111-4111-8111-111111111111",
+      "ParentNodeId": "00000001-1111-4111-8111-111111111111",
+      "Name": "Eras",
+      "RowType": "Groups",
+      "Category": "Sub Group",
+      "SortOrder": 203,
+      "NodeIds": [
+        "00000002-1111-4111-8111-111111111111"
+      ],
+      "MediaLinkIds": [],
+      "Items": [],
+      "MediaOrder": []
+    },
+    {
+      "Id": "00000204-1111-4111-8111-111111111111",
+      "ParentNodeId": "00000003-1111-4111-8111-111111111111",
+      "Name": "Second Franchise Timeline",
+      "RowType": "Timeline",
+      "Category": "Chronological Order",
+      "SortOrder": 204,
+      "NodeIds": [],
+      "MediaLinkIds": [
+        "00000014-1111-4111-8111-111111111111"
+      ],
+      "Items": [],
+      "MediaOrder": [
+        "00000014-1111-4111-8111-111111111111"
+      ]
+    }
+  ],
+  "FutureConfigurationField": {
+    "note": "unknown fields must survive legacy import/export"
+  }
+}

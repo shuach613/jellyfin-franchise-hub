@@ -1,0 +1,46 @@
+'use strict';
+/* Golden legacy JSON fixture — tests existing import/edit semantics, NOT new playback architecture. */
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const root=path.join(__dirname,'..');
+const raw=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/parity/legacy_v1_two_franchises.json'),'utf8'));
+const source=fs.readFileSync(path.join(root,'src/Jellyfin.Plugin.FranchiseExplorer/Configuration/franchise-settings-core.js'),'utf8');
+const ctx={URL};vm.runInNewContext(source,ctx);
+const core=ctx.FranchiseSettingsCore;
+const plain=x=>JSON.parse(JSON.stringify(x));
+const guid=n=>String(n).padStart(8,'0')+'-1111-4111-8111-111111111111';
+const before=JSON.stringify(raw);
+const normalized=plain(core.normalize(raw));
+assert.equal(JSON.stringify(raw),before,'normalization must not mutate the imported backup');
+assert.equal(raw.schemaVersion,1,'fixture must remain the upstream legacy backup format');
+assert.equal(normalized.Nodes.length,3);
+assert.equal(normalized.MediaLinks.length,5);
+assert.equal(normalized.Rows.length,4);
+assert.equal(normalized.FutureConfigurationField.note,'unknown fields must survive legacy import/export');
+assert.equal(normalized.Nodes[0].FutureNodeField,'preserve-me');
+assert.equal(normalized.MediaLinks.find(x=>x.Id===guid(11)).FutureLinkField,'keep');
+const timeline=normalized.Rows.find(x=>x.Id===guid(201));
+assert(timeline && timeline.RowType==='Timeline');
+assert.deepEqual(timeline.MediaOrder,[10,11,12,20,13].map(guid),
+  'mixed media links and row-direct series must preserve exact chronological references');
+assert.equal(timeline.Items.length,1);
+assert.equal(timeline.Items[0].JellyfinItemId,guid(305));
+assert.equal(timeline.Items[0].RangeMode,'Episodes');
+assert.deepEqual([timeline.Items[0].StartSeason,timeline.Items[0].StartEpisode,timeline.Items[0].EndSeason,timeline.Items[0].EndEpisode],[2,1,2,2]);
+assert.equal(timeline.FutureRowField,'preserve');
+const other=normalized.Rows.find(x=>x.Id===guid(204));
+assert.deepEqual(other.MediaOrder,[guid(14)],'different franchises must not share ordering');
+const unrelated=JSON.stringify(other);
+const changed=plain(normalized);
+changed.Rows.find(x=>x.Id===guid(201)).MediaOrder.reverse();
+assert.equal(JSON.stringify(changed.Rows.find(x=>x.Id===guid(204))),unrelated,'edits must not mutate other franchises');
+assert.deepEqual(plain(core.normalize(normalized)),normalized,'legacy normalization must be idempotent');
+assert.deepEqual(plain(core.normalize(JSON.parse(JSON.stringify(normalized)))),normalized,
+  'JSON re-import must retain the complete normalized configuration');
+assert.equal(normalized.MediaLinks.find(x=>x.Id===guid(11)).StartEpisode,1);
+assert.equal(normalized.MediaLinks.find(x=>x.Id===guid(13)).EndEpisode,3);
+const invalid=plain(raw);invalid.Nodes[0].ParentId=guid(2);
+assert.throws(()=>core.normalize(invalid),/Circular/,'cycles must be rejected during import');
+assert.throws(()=>core.normalize({...raw,Nodes:[...raw.Nodes,raw.Nodes[0]]}),/Duplicate group/);
+assert.equal(raw.Rows.find(x=>x.Id===guid(201)).MediaOrder.length,5);
+console.log('PASS Step 3 legacy fixture: multiple franchises, nested eras, mixed chronology, individual ranges, stable identities, unknown fields and re-import');
