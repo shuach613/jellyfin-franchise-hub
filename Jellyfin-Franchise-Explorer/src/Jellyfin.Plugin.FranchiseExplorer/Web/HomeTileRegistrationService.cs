@@ -1,0 +1,239 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using MediaBrowser.Controller;
+using MediaBrowser.Controller.Plugins;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Jellyfin.Plugin.FranchiseExplorer.Services;
+using Jellyfin.Plugin.FranchiseExplorer.Tasks;
+using MediaBrowser.Model.Tasks;
+
+namespace Jellyfin.Plugin.FranchiseExplorer.Web;
+
+/// <summary>
+/// Optional, non-destructive Jellyfin Web integration. If the separate
+/// JavaScript Injector plugin is installed, register a browser-only My Media
+/// card. Franchise Explorer itself works when Injector is absent.
+/// </summary>
+public sealed class HomeTileRegistrationService : IHostedService, IDisposable
+{
+    private const string InjectorAssemblyName = "Jellyfin.Plugin.JavaScriptInjector";
+    private const string ScriptResourceName = "Jellyfin.Plugin.FranchiseExplorer.Web.franchise-my-media.js";
+    private const string TimelineResourceName = "Jellyfin.Plugin.FranchiseExplorer.Web.franchise-timeline.js";
+    private const string TileArtResourceName = "Jellyfin.Plugin.FranchiseExplorer.Web.franchise-tile-backdrop.webp";
+    // Script IDs are stable within a UI generation, not forever. Injector and
+    // Jellyfin Web can cache the previous script despite a DLL replacement.
+    // A new ID lets this release load the updated home and menu integration.
+    private const string CurrentScriptId = "jellyfin-franchise-explorer-my-media-v08928";
+    private static readonly string[] LegacyScriptIds =
+    {
+        "jellyfin-franchise-explorer-my-media-v08927",
+        "jellyfin-franchise-explorer-my-media-v08926",
+        "jellyfin-franchise-explorer-my-media-v08925",
+        "jellyfin-franchise-explorer-my-media-v08924",
+        "jellyfin-franchise-explorer-my-media-v08923",
+        "jellyfin-franchise-explorer-my-media-v08922",
+        "jellyfin-franchise-explorer-my-media-v08921",
+        "jellyfin-franchise-explorer-my-media-v08920",
+        "jellyfin-franchise-explorer-my-media-v08919",
+        "jellyfin-franchise-explorer-my-media-v08918",
+        "jellyfin-franchise-explorer-my-media-v08917",
+        "jellyfin-franchise-explorer-my-media-v08916",
+        "jellyfin-franchise-explorer-my-media-v08915",
+        "jellyfin-franchise-explorer-my-media-v08914",
+        "jellyfin-franchise-explorer-my-media-v08913",
+        "jellyfin-franchise-explorer-my-media-v08912",
+        "jellyfin-franchise-explorer-my-media-v08911",
+        "jellyfin-franchise-explorer-my-media-v08910",
+        "jellyfin-franchise-explorer-my-media-v0899",
+        "jellyfin-franchise-explorer-my-media-v0898",
+        "jellyfin-franchise-explorer-my-media-v0897",
+        "jellyfin-franchise-explorer-my-media-v0896",
+        "jellyfin-franchise-explorer-my-media-v0895",
+        "jellyfin-franchise-explorer-my-media-v0894",
+        "jellyfin-franchise-explorer-my-media-v0893",
+        "jellyfin-franchise-explorer-my-media-v1"
+    };
+    private readonly ILogger<HomeTileRegistrationService> _logger;
+    private readonly CancellationTokenSource _stopping = new();
+    private Task? _registrationTask;
+
+    public HomeTileRegistrationService(ILogger<HomeTileRegistrationService> logger)
+    {
+        _logger = logger;
+    }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Do not block Jellyfin startup if the optional companion is missing
+        // or loads after this hosted service.
+        _registrationTask = Task.Run(() => RegisterWithRetriesAsync(_stopping.Token), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _stopping.Cancel();
+        if (_registrationTask is not null)
+        {
+            try
+            {
+                await _registrationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal when Jellyfin is stopping.
+            }
+        }
+    }
+
+    public void Dispose() => _stopping.Dispose();
+
+    private async Task RegisterWithRetriesAsync(CancellationToken cancellationToken)
+    {
+        // Allow optional JavaScript Injector to finish its own startup.
+        // Bounded retry: no background polling after startup.
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+            try
+            {
+                if (TryRegister())
+                {
+                    _logger.LogInformation(
+                        "Franchise Explorer: My Media web tile registered with the optional JavaScript Injector plugin.");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Franchise Explorer: optional My Media tile registration attempt failed.");
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        _logger.LogInformation(
+            "Franchise Explorer: optional JavaScript Injector integration unavailable; the standalone browser remains accessible. " +
+            "Install JavaScript Injector and restart Jellyfin to add the web-only My Media card.");
+    }
+
+    private bool TryRegister()
+    {
+        Assembly? injectorAssembly = AssemblyLoadContext.All
+            .SelectMany(context => context.Assemblies)
+            .FirstOrDefault(assembly =>
+                string.Equals(assembly.GetName().Name, InjectorAssemblyName, StringComparison.Ordinal));
+        if (injectorAssembly is null) return false;
+
+        Type? interfaceType = injectorAssembly.GetType(InjectorAssemblyName + ".PluginInterface");
+        MethodInfo? register = interfaceType?.GetMethod("RegisterScript", BindingFlags.Public | BindingFlags.Static);
+        if (register is null) return false;
+        ParameterInfo[] parameters = register.GetParameters();
+        if (parameters.Length != 1) return false;
+
+        // The companion expects its own Newtonsoft JObject. Instantiate the
+        // *exact parameter type* by reflection to avoid AssemblyLoadContext
+        // version conflicts; no third-party DLL is shipped with this plugin.
+        Type payloadType = parameters[0].ParameterType;
+        MethodInfo? parse = payloadType.GetMethod("Parse", new[] { typeof(string) });
+        if (parse is null) return false;
+
+        using Stream? stream = typeof(global::Jellyfin.Plugin.FranchiseExplorer.Plugin).Assembly.GetManifestResourceStream(ScriptResourceName);
+        if (stream is null) throw new InvalidOperationException("Embedded home-tile JavaScript resource missing.");
+        using var reader = new StreamReader(stream);
+        string script = reader.ReadToEnd();
+        // The home-page popup reuses the same chronological timeline engine as
+        // Browse. Load it before the home widget in the ONE Injector script;
+        // the browser never needs to navigate to the standalone editor.
+        using Stream? timelineStream = typeof(global::Jellyfin.Plugin.FranchiseExplorer.Plugin).Assembly.GetManifestResourceStream(TimelineResourceName);
+        if (timelineStream is null) throw new InvalidOperationException("Embedded franchise timeline JavaScript resource missing.");
+        using var timelineReader = new StreamReader(timelineStream);
+        script = timelineReader.ReadToEnd() + "\n" + script;
+        // Keep the standalone browser script readable/testable. At runtime the
+        // DLL supplies its embedded artwork as a small self-contained data URI.
+        using Stream? artStream = typeof(global::Jellyfin.Plugin.FranchiseExplorer.Plugin).Assembly.GetManifestResourceStream(TileArtResourceName);
+        if (artStream is not null)
+        {
+            using var buffer = new MemoryStream();
+            artStream.CopyTo(buffer);
+            string url = "data:image/webp;base64," + Convert.ToBase64String(buffer.ToArray());
+            script = script.Replace("__FE_TILE_ART_DATA_URL__", url, StringComparison.Ordinal);
+        }
+
+        string json = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["id"] = CurrentScriptId,
+            ["name"] = "Franchise Explorer - My Media tile",
+            ["script"] = script,
+            ["module"] = false,
+            ["enabled"] = true,
+            ["requiresAuthentication"] = false,
+            ["pluginId"] = global::Jellyfin.Plugin.FranchiseExplorer.Plugin.PluginId.ToString(),
+            ["pluginName"] = "Franchise Explorer",
+            ["pluginVersion"] = "0.8.9.28"
+        });
+
+        object? payload = parse.Invoke(null, new object[] { json });
+        if (payload is null) return false;
+        object? result = register.Invoke(null, new[] { payload });
+        if (result is not bool success || !success) return false;
+
+        // Only retire our own exact older script, and only AFTER the new
+        // registration succeeds. Never erase user-created Injector scripts.
+        // An older Injector without this optional API keeps working.
+        MethodInfo? unregister = interfaceType?.GetMethod("UnregisterScript", BindingFlags.Public | BindingFlags.Static);
+        if (unregister is not null && unregister.GetParameters().Length == 1 &&
+            unregister.GetParameters()[0].ParameterType == typeof(string))
+        {
+            foreach (string legacyId in LegacyScriptIds)
+            {
+                try
+                {
+                    unregister.Invoke(null, new object[] { legacyId });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Franchise Explorer: previous My Media Injector script {LegacyScriptId} could not be retired; check for duplicate plugin scripts.", legacyId);
+                }
+            }
+        }
+        return true;
+    }
+}
+
+/// <summary>
+/// Discovered by Jellyfin's DI container when the plugin is installed.
+/// </summary>
+public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
+{
+    public void RegisterServices(IServiceCollection services, IServerApplicationHost applicationHost)
+    {
+        services.AddHostedService<HomeTileRegistrationService>();
+        services.AddHostedService<TimelinePlaybackMonitorService>();
+        services.AddSingleton<FranchiseLibrarySnapshotService>();
+        services.AddSingleton<AutoFranchiseService>();
+        services.AddSingleton<IScheduledTask, AutoFranchisesTask>();
+        services.AddSingleton<MediaRecoveryService>();
+        services.AddHostedService(provider => provider.GetRequiredService<MediaRecoveryService>());
+        services.AddSingleton<PlaybackSubtitlePolicyStore>();
+        services.AddScoped<PlaybackSubtitlePolicyFilter>();
+        services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
+            options.Filters.AddService<PlaybackSubtitlePolicyFilter>());
+    }
+}
