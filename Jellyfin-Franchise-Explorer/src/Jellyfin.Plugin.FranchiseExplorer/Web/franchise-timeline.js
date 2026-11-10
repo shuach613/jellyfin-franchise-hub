@@ -1,0 +1,815 @@
+/* Per-launch subtitle preferences. The server scopes negotiation to this user,
+ * selected device and explicit item queue; Jellyfin account defaults are untouched. */
+(function(global){
+  'use strict';
+  if(global.FranchiseSubtitlePreferences)return;
+  const canonical=value=>String(value||'').replace(/-/g,'').toLowerCase();
+  const guid=value=>/^[a-f\d]{32}$|^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(String(value||''));
+  function stored(prefix,serverId,userId){
+    try{
+      const storage=global.localStorage;
+      const exact=storage.getItem(prefix+serverId+':'+userId);
+      if(exact!=null)return exact;
+      for(let i=0;i<storage.length;i++){
+        const key=storage.key(i);if(!key?.startsWith(prefix))continue;
+        const [server,user]=key.slice(prefix.length).split(':');
+        if(canonical(server)===canonical(serverId)&&canonical(user)===canonical(userId))return storage.getItem(key);
+      }
+    }catch(_){/* A denied browser store must not alter another user's defaults. */}
+    return null;
+  }
+  function read(serverId,userId,fallback={}){
+    const enabled=stored('fe-subtitles:',serverId,userId);
+    const language=stored('fe-subtitle-language:',serverId,userId);
+    return {subtitleEnabled:enabled===null?!!fallback.subtitleEnabled:enabled==='1',
+      subtitleLanguage:language===null?(fallback.subtitleLanguage||''):language};
+  }
+  function headers(context){
+    return {Authorization:'MediaBrowser Token="'+String(context.token||'').replace(/["\\\r\n]/g,'')+'"',
+      'Content-Type':'application/json'};
+  }
+  async function request(context,path,options={}){
+    const response=await fetch((context.prefix||'')+path,{cache:'no-store',...options,
+      headers:{...headers(context),...(options.headers||{})}});
+    if(!response.ok)throw Error('Jellyfin could not apply franchise subtitle preferences (HTTP '+response.status+').');
+    return response.status===204?null:response.json();
+  }
+  let active=null,generation=0,enrollment=Promise.resolve();
+  function queue(context){
+    const ids=[...new Set((context.itemIds||[]).filter(guid))].slice(0,1000);
+    if(!context.userId||!context.deviceId||!context.token||!ids.length)
+      throw Error('The signed-in playback device could not be identified for subtitle settings.');
+    return {...context,itemIds:ids};
+  }
+  async function enroll(context,preferences,serial){
+    // Serialize enrollment so an older request cannot overwrite a newer switch
+    // on the server when a user changes the preference during a launch.
+    const pending=enrollment.catch(()=>{}).then(()=>{
+      if(serial!==generation)throw Error('Subtitle preference request was superseded by a newer selection.');
+      return request(context,'/FranchiseExplorer/PlaybackPreferences',{method:'POST',
+        body:JSON.stringify({deviceId:context.deviceId,itemIds:context.itemIds,
+          mediaSourceId:context.mediaSourceId||null,enabled:preferences.subtitleEnabled,
+          language:preferences.subtitleLanguage})});
+    });
+    enrollment=pending.then(()=>{},()=>{});
+    const result=await pending;
+    if(serial!==generation)throw Error('Subtitle preference request was superseded by a newer selection.');
+    if(!result||typeof result.enabled!=='boolean'||result.enabled!==preferences.subtitleEnabled)
+      throw Error('Jellyfin did not confirm the requested subtitle preference.');
+    return {...preferences,subtitleLanguage:result.language||preferences.subtitleLanguage,
+      subtitleStreamIndex:result.enabled?(Number.isInteger(result.subtitleStreamIndex)?result.subtitleStreamIndex:null):-1,
+      mediaSourceId:result.mediaSourceId||''};
+  }
+  async function prepare(context,fallback={}){
+    const next=queue(context),serial=++generation;
+    const preferences=read(next.serverId,next.userId,fallback);
+    const settings=await enroll(next,preferences,serial);
+    active={...next,preferences};
+    return settings;
+  }
+  async function refresh(){
+    if(!active)return;
+    const previous=active,serial=++generation;
+    const sessions=await request(previous,'/Sessions');
+    if(serial!==generation||active!==previous)return;
+    const session=(Array.isArray(sessions)?sessions:[]).find(value=>
+      canonical(value.UserId)===canonical(previous.userId)&&value.DeviceId===previous.deviceId&&
+      previous.itemIds.some(id=>canonical(id)===canonical(value.NowPlayingItem?.Id)));
+    const id=session?.NowPlayingItem?.Id;
+    const next=id?{...previous,mediaSourceId:session.PlayState?.MediaSourceId||'',
+      itemIds:[id,...previous.itemIds.filter(value=>canonical(value)!==canonical(id))]}:previous;
+    const preferences=read(next.serverId,next.userId,previous.preferences);
+    const settings=await enroll(next,preferences,serial);
+    if(serial!==generation)return;
+    active={...next,preferences};
+    if(session?.Id){
+      const index=settings.subtitleStreamIndex;
+      if(Number.isInteger(index)){
+        await request(next,'/Sessions/'+encodeURIComponent(session.Id)+'/Command',{method:'POST',
+          body:JSON.stringify({Name:'SetSubtitleStreamIndex',Arguments:{Index:String(index)}})});
+      }
+    }
+    if(session?.Id)global.dispatchEvent?.(new CustomEvent('franchise-subtitles-applied',{
+      detail:{...settings,serverId:next.serverId,userId:next.userId,deviceId:next.deviceId}}));
+  }
+  function changed(event){
+    if(!active)return;
+    const detail=event?.detail;
+    if(detail&&(canonical(detail.userId)!==canonical(active.userId)||
+      canonical(detail.serverId)!==canonical(active.serverId)))return;
+    void refresh().catch(error=>{
+      console.error('Franchise Explorer: subtitle preference update failed',error);
+      global.dispatchEvent?.(new CustomEvent('franchise-subtitles-error',{detail:{message:error.message}}));
+    });
+  }
+  global.addEventListener?.('franchise-subtitles-changed',changed);
+  global.addEventListener?.('storage',event=>{
+    if(event.key?.startsWith('fe-subtitles:')||event.key?.startsWith('fe-subtitle-language:'))changed();
+  });
+  global.FranchiseSubtitlePreferences={read,prepare,refresh};
+})(window);
+
+/* Franchise Explorer v0.8.9.5 local Jellyfin Web playback handoff.
+ * A Jellyfin PlayNow queue is built from item IDs, never from filenames.
+ * Timeline state is separate from Jellyfin watched flags and user-specific.
+ */
+(function (global) {
+  'use strict';
+  const guid = v => /^[a-f\d]{32}$|^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(String(v || ''));
+  const n = value => Math.max(0, Number.parseInt(value,10) || 0);
+  const esc = v => String(v || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // The Jellyfin 12.2 API host can return PascalCase even when plugin JSON
+  // storage uses camelCase. Normalize either shape before reading progress.
+  const timelineResponse = raw => {
+    const record = value => {
+      if(!value || typeof value!=='object' || Array.isArray(value))return value;
+      const output={};
+      for(const [key,item] of Object.entries(value))output[key[0].toLowerCase()+key.slice(1)]=item;
+      return output;
+    };
+    return Array.isArray(raw)?raw.map(record):record(raw);
+  };
+  const rangeLabel = r => r.rangeMode === 'Seasons' ? `Seasons ${r.startSeason}–${r.endSeason}` :
+    r.rangeMode === 'Episodes' ? `S${r.startSeason}E${r.startEpisode}–S${r.endSeason}E${r.endEpisode}` : 'Entire title';
+  const epNumber = e => [n(e.ParentIndexNumber),n(e.IndexNumber)];
+  const compareEpisode = (a,b) => epNumber(a)[0]-epNumber(b)[0] || epNumber(a)[1]-epNumber(b)[1];
+  const inRange = (e,r) => {
+    const season=n(e.ParentIndexNumber), episode=n(e.IndexNumber);
+    if (episode===0 || !e.Id) return false; // exclude virtual placeholders
+    if (!r.rangeMode || r.rangeMode==='Full') return season>0; // specials only when selected explicitly
+    const start=n(r.startSeason), end=n(r.endSeason);
+    if (end < start) return false;
+    if (r.rangeMode==='Seasons') return season>=start && season<=end;
+    if (r.rangeMode==='Episodes') {
+      const from=n(r.startEpisode),to=n(r.endEpisode);
+      if (from<1 || to<1 || season<start || season>end || start===end && to<from) return false;
+      return (season>start || episode>=from) && (season<end || episode<=to);
+    }
+    return false;
+  };
+  class TimelineManager {
+    constructor(context) {
+      this.context=context;this.states=new Map();this.queues=new Map();this.activeDialog=null;
+      this.pollTimer=null;this.currentRow=null;this.latestSession=null;this.inflight=false;
+    }
+    headers(){return {'Authorization':'MediaBrowser Token="'+this.context.token+'"'};}
+    url(path){return this.context.prefix+(path.startsWith('/')?path:'/'+path);}
+    async request(path,options={}) {
+      const res=await fetch(this.url(path),{cache:'no-store',...options,headers:{...this.headers(),...(options.headers||{})}});
+      if(!res.ok)throw new Error('Jellyfin returned HTTP '+res.status+' for '+path.split('?')[0]);
+      if(res.status===204)return null;
+      const value=await res.json();
+      return path.startsWith('/FranchiseExplorer/TimelineState')?timelineResponse(value):value;
+    }
+    async load(){
+      try {const states=await this.request('/FranchiseExplorer/TimelineState');
+        this.states=new Map((Array.isArray(states)?states:[]).map(s=>[s.rowId,s]));
+      }catch(e){console.warn('Franchise timeline state unavailable:',e);}
+      this.beginMonitoring();
+    }
+    getState(rowId){return this.states.get(rowId)||null;}
+    async save(state){
+      state.updatedUtc=new Date().toISOString();
+      const result=await this.request('/FranchiseExplorer/TimelineState/'+encodeURIComponent(state.rowId),{
+        method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)
+      });
+      this.states.set(state.rowId,result);return result;
+    }
+    async getEpisodes(seriesId){
+      const all=[];let offset=0;const size=250;
+      for(let page=0;page<100;page++){
+        const result=await this.request('/Shows/'+encodeURIComponent(seriesId)+'/Episodes?userId='+encodeURIComponent(this.context.userId)+'&startIndex='+offset+'&limit='+size+'&isMissing=false&Fields=ProviderIds');
+        const part=(result?.Items||[]).filter(e=>e && guid(e.Id) && e.Type==='Episode');
+        all.push(...part);offset+=(result?.Items||[]).length;
+        if(!result?.Items?.length || offset >= (result.TotalRecordCount||0))break;
+      }
+      return all.sort(compareEpisode);
+    }
+    async getCollection(id){
+      const all=[];let offset=0;
+      for(let page=0;page<100;page++){
+        const r=await this.request('/Items?ParentId='+encodeURIComponent(id)+'&Recursive=true&IncludeItemTypes=Movie,Series&StartIndex='+offset+'&Limit=250&UserId='+encodeURIComponent(this.context.userId)+'&Fields=ProviderIds');
+        all.push(...(r.Items||[]));offset+=(r.Items||[]).length;
+        if(!r.Items?.length || offset >= (r.TotalRecordCount||0))break;
+      }
+      return all.filter(i=>i&&['Movie','Series'].includes(i.Type));
+    }
+    allowed(media,row,parentSeries=null){
+      const canonical=value=>String(value||'').replace(/-/g,'').toLowerCase();
+      const provider=(item,name)=>Object.entries(item?.ProviderIds||{}).find(([key])=>key.toLowerCase()===String(name||'Imdb').toLowerCase())?.[1];
+      const matches=(rule,item,extraId='')=>{
+        const ids=[rule.itemId,...(rule.itemIds||[])].map(canonical).filter(Boolean);
+        return ids.includes(canonical(item?.Id)) || ids.includes(canonical(extraId)) ||
+          !!rule.providerId && String(provider(item,rule.providerName)||'').toLowerCase()===String(rule.providerId).toLowerCase();
+      };
+      const episode=media.Type==='Episode';
+      const show=parentSeries||(episode?{Id:media.SeriesId,ProviderIds:media.SeriesProviderIds}:media.Type==='Series'?media:null);
+      const season=n(media.ParentIndexNumber),first=n(media.IndexNumber),last=Math.max(first,n(media.IndexNumberEnd)||first);
+      for(const rule of row.exclusions||[]){
+        if(rule.enabled===false)continue;
+        const scope=String(rule.scope||'').toLowerCase(),showMatch=!!show&&matches(rule,show,media.SeriesId),mediaMatch=matches(rule,media);
+        if(scope==='movie'){if(media.Type==='Movie'&&mediaMatch)return false;continue;}
+        if(['wholeshow','show','series'].includes(scope)){if((episode||media.Type==='Series')&&showMatch)return false;continue;}
+        if(!episode||!showMatch&&!mediaMatch)continue;
+        const startSeason=n(rule.startSeason),endSeason=n(rule.endSeason)||startSeason;
+        const startEpisode=n(rule.startEpisode),endEpisode=n(rule.endEpisode)||startEpisode;
+        if(scope==='season'&&season>=startSeason&&season<=endSeason)return false;
+        // One physical episode item can contain several numbered episodes. Excluding
+        // any part excludes the file; playback cannot start in only its allowed half.
+        const inside=value=>season>=startSeason&&season<=endSeason&&
+          (season>startSeason||value>=startEpisode)&&(season<endSeason||value<=endEpisode);
+        if(scope==='allowedrange'&&(!inside(first)||!inside(last)))return false;
+        if(scope==='episode'&&((mediaMatch&&startEpisode===0)||
+          (season>startSeason||season===startSeason&&last>=startEpisode)&&
+          (season<endSeason||season===endSeason&&first<=endEpisode)))return false;
+      }
+      return true;
+    }
+    async resolve(row){
+      if(row.rowType!=='Timeline')throw new Error('Choose a chronological / viewing-order row.');
+      const catalog=this.context.catalog;
+      const links=(row.mediaLinkIds||[]).map(id=>catalog.links.find(l=>l.id===id)).filter(Boolean);
+      const own=(row.items||[]).filter(x=>guid(x.itemId));
+      const ranks=new Map((row.mediaOrder||[]).map((id,i)=>[id,i]));
+      const refs=[...links,...own];
+      if(ranks.size) refs.sort((a,b)=>(ranks.get(a.id)??99999)-(ranks.get(b.id)??99999));
+      const queue=[],warnings=[],duplicateCheck=new Set(),parents=new Map();
+      for(const ref of refs){
+        if(!guid(ref.itemId)){warnings.push('A saved reference has no valid Jellyfin item ID.');continue;}
+        const item=await this.context.getItem(ref.itemId);
+        if(!item){warnings.push('An item is missing or not accessible to your Jellyfin account.');continue;}
+        let items=[];
+        try {
+          if(item.Type==='Movie' || item.Type==='Episode')items=[{media:item,parent:null}];
+          else if(item.Type==='Series')items=(await this.getEpisodes(item.Id)).filter(ep=>inRange(ep,ref)).map(media=>({media,parent:item}));
+          else if(item.Type==='BoxSet'){
+            const members=await this.getCollection(item.Id);
+            for(const member of members){if(member.Type==='Movie')items.push({media:member,parent:null});
+              else if(member.Type==='Series')items.push(...(await this.getEpisodes(member.Id)).map(media=>({media,parent:member})));}
+          }else{warnings.push('Cannot queue unsupported type '+item.Type+'.');continue;}
+        }catch(e){warnings.push('Unable to resolve '+(item.Name||'item')+': '+e.message);continue;}
+        if(!items.length){warnings.push((item.Name||'TV Show')+' has no accessible episodes matching '+rangeLabel(ref)+'.');continue;}
+        for(const resolved of items){
+          const media=resolved.media;let parent=resolved.parent;
+          if(!guid(media.Id))continue;
+          if(media.Type==='Episode'&&!parent&&guid(media.SeriesId)&&(row.exclusions||[]).length){
+            const id=String(media.SeriesId).toLowerCase();
+            if(!parents.has(id))parents.set(id,Promise.resolve(this.context.getItem(media.SeriesId)).catch(()=>null));
+            parent=await parents.get(id);
+          }
+          if(!this.allowed(media,row,parent))continue;
+          const key=ref.id+':'+media.Id.toLowerCase();
+          if(duplicateCheck.has(key))continue;
+          duplicateCheck.add(key);
+          const label=media.Type==='Episode'
+            ? (item.Name||media.SeriesName||'TV Show')+' · S'+n(media.ParentIndexNumber)+'E'+n(media.IndexNumber)+' · '+(media.Name||'Episode')
+            : (media.Name||'Movie');
+          queue.push({key,id:media.Id,label,kind:media.Type,seriesId:media.SeriesId||parent?.Id||'',
+            sourceItemId:item.Id,season:n(media.ParentIndexNumber),episode:n(media.IndexNumber),
+            runTimeTicks:n(media.RunTimeTicks),referenceId:ref.id,range:rangeLabel(ref)});
+        }
+      }
+      if(row.nodeIds?.length)warnings.push('Subgroups in a chronological row are not expanded automatically; add their individual media titles.');
+      this.queues.set(row.id,queue);
+      return {queue,warnings};
+    }
+    // A Jellyfin 204 response only acknowledges dispatch. It does not prove
+    // that the destination client accepted the remote play command.
+    isRemoteCapable(session){
+      return session && session.SupportsRemoteControl !== false &&
+        session.SupportsMediaControl !== false &&
+        session.Capabilities?.SupportsMediaControl !== false;
+    }
+    async sessions(){
+      const all=await this.request('/Sessions?ControllableByUserId='+encodeURIComponent(this.context.userId));
+      return (Array.isArray(all)?all:[]).filter(s=>s?.Id &&
+        String(s.UserId||'').replace(/-/g,'').toLowerCase()===String(this.context.userId).replace(/-/g,'').toLowerCase()
+      );
+    }
+    async verifyStarted(sessionId,expectedItemId,options={}){
+      const retries=options.retries??12;
+      const delay=options.delay??900;
+      for(let i=0;i<retries;i++){
+        // The server's NowPlayingItem is an observed state, unlike the HTTP
+        // return code from the remote command. Never infer playback from 204.
+        try{
+          const sessions=await this.sessions();
+          const session=sessions.find(s=>s.Id===sessionId);
+          const actual=String(session?.NowPlayingItem?.Id||'').replace(/-/g,'').toLowerCase();
+          const expected=String(expectedItemId).replace(/-/g,'').toLowerCase();
+          if(actual && actual===expected)return session;
+        }catch(error){
+          if(i===retries-1)throw new Error('Unable to verify Jellyfin playback: '+error.message);
+        }
+        if(i<retries-1)await new Promise(resolve=>setTimeout(resolve,delay));
+      }
+      throw new Error('Jellyfin accepted the Play Now command but '+
+        'the selected device did not report starting the requested movie/episode. '+
+        'Nothing was added to chronological watch history. '+
+        'This client may not support remote control. Check its playback/casting capabilities, '+
+        'choose a supported device, and retry using a short timeline.');
+    }
+    async play(queue,sessionId,index=0,positionTicks=0){
+      if(!sessionId || !queue.length || index<0 || index>=queue.length)
+        throw new Error('Choose a playback device and playable item.');
+      const devices=await this.sessions();
+      const destination=devices.find(s=>s.Id===sessionId);
+      if(!destination)throw new Error('The selected Jellyfin device is no longer connected or accessible. Reopen the playback dialog.');
+      if(!this.isRemoteCapable(destination))
+        throw new Error((destination.DeviceName||destination.Client||'This playback device')+
+          ' reports that remote media control is disabled. Jellyfin cannot start a queue on it via the Sessions API. '+
+          'Choose a remote-controllable player or enable casting/remote control in the device. '+
+          'Your timeline history was not changed.');
+      const subtitles=await global.FranchiseSubtitlePreferences.prepare({
+        serverId:this.context.serverId,userId:this.context.userId,token:this.context.token,
+        prefix:this.context.prefix,deviceId:destination.DeviceId,
+        itemIds:queue.slice(index).map(item=>item.id)
+      });
+      const chunks=[];
+      // Start with a modest batch; adding all 422 titles before verifying the
+      // client can start a single item is both slow and misleading.
+      for(let i=index;i<queue.length;i+=24)chunks.push(queue.slice(i,i+24));
+      const command=async (ids,cmd,position)=>{
+        const url='/Sessions/'+encodeURIComponent(sessionId)+'/Playing?playCommand='+cmd+
+          '&itemIds='+encodeURIComponent(ids.map(q=>q.id).join(','))+
+          '&startIndex=0&startPositionTicks='+Math.max(0,position)+
+          (cmd==='PlayNow'&&Number.isInteger(subtitles.subtitleStreamIndex)?'&subtitleStreamIndex='+subtitles.subtitleStreamIndex:'')+
+          (cmd==='PlayNow'&&subtitles.mediaSourceId?'&mediaSourceId='+encodeURIComponent(subtitles.mediaSourceId):'');
+        const res=await fetch(this.url(url),{method:'POST',headers:this.headers()});
+        if(!res.ok)throw new Error('Jellyfin rejected '+cmd+' for the selected device (HTTP '+res.status+').');
+      };
+      await command(chunks[0],'PlayNow',positionTicks);
+      await this.verifyStarted(sessionId,queue[index].id);
+      // Append only after the player has really started the correct item.
+      // PlayLast support can still vary by client; test longer queues on the
+      // real device before trusting unattended chronological playback.
+      for(let i=1;i<chunks.length;i++){
+        await new Promise(resolve=>setTimeout(resolve,250));
+        await command(chunks[i],'PlayLast',0);
+      }
+      return {started:true,appendedChunks:chunks.length-1};
+    }
+    // Playing on the same Jellyfin Web client is not remote-control playback.
+    // Hand off to Jellyfin Web's native Play control; only Jellyfin's observed
+    // NowPlayingItem will activate timeline tracking. A localStorage request
+    // is an expiring *intent*, NOT watch history.
+    handoffKey(){return 'fe-local-timeline-v1:'+String(this.context.userId).toLowerCase();}
+    async playHere(row,queue,index,positionTicks=0,reset=false,replayOnly=false,forceStartOver=false){
+      if(index<0 || index>=queue.length)throw new Error('Select a playable entry.');
+      const target=queue[index];
+      const prev=this.getState(row.id);
+      const state=this.makeState(row,queue,index);
+      state.index=index;state.itemId=target.id;state.positionTicks=Math.max(0,positionTicks);
+      state.sessionId='';state.playbackMode='armed';
+      if(reset)state.completedKeys=state.completedKeys.filter(k=>queue.findIndex(q=>q.key===k)<index);
+      // Commit the selected row and expected item BEFORE launching the Jellyfin
+      // player. The server's PlaybackStart/Progress event can now bind the real
+      // session even when browser session discovery misses the short playback.
+      // Replay only must disarm an already-active timeline before the same
+      // session can replay its current item; preserve cursor and completed keys.
+      // With no prior timeline state there is nothing to disarm or persist.
+      const ready=replayOnly
+        ? (prev?await this.save({...prev,playbackMode:'replay',sessionId:'',armedUtc:null}):state)
+        : await this.save(state);
+      if(replayOnly){
+        // A prior tracked local playback may still have a browser-side auto-next
+        // owner. Clear it for this row before playing an independent title.
+        const suffix=String(this.context.userId).toLowerCase();
+        const ownerKey='fe-local-follow-v1:'+suffix;
+        try{
+          const owner=JSON.parse(localStorage.getItem(ownerKey)||'null');
+          if(owner?.rowId===row.id){
+            localStorage.removeItem(ownerKey);
+            localStorage.removeItem('fe-local-completion-v1:'+suffix);
+          }
+        }catch(_){localStorage.removeItem(ownerKey);}
+      }
+      const intent={version:1,created:Date.now(),rowId:row.id,expectedId:target.id,
+        state:ready,replayOnly:!!replayOnly,forceStartOver:!!forceStartOver,homeOnly:true,
+        routePending:false,navigationAttempts:0,prior:prev?JSON.parse(JSON.stringify(prev)):null,
+        // The checkbox now lives in the plugin settings page. Read its
+        // unchanged per-user preference directly for timeline handoff.
+        subtitleEnabled:localStorage.getItem('fe-subtitles:'+this.context.serverId+':'+this.context.userId)==='1',
+        subtitleLanguage:localStorage.getItem('fe-subtitle-language:'+this.context.serverId+':'+this.context.userId)||''};
+      // The server records only an expiring intent until actual playback is
+      // observed; the browser bridge separately verifies its local player.
+      localStorage.setItem(this.handoffKey(),JSON.stringify(intent));
+      window.FranchiseExplorerPlaybackReturn?.arm(target.id,location.href);
+      // On Jellyfin Web, use the native shortcuts/PlaybackManager path. The
+      // injected bridge creates the ordinary Jellyfin Play/Resume action and
+      // watches the real local player; it never uses the Details page as a
+      // fallback. Details is a separate, explicit user action.
+      const native=window.FranchiseExplorerNativePlayback;
+      if(native && typeof native.play==='function'){
+        try{
+          if(native.play(target.id,{positionTicks:Math.max(0,positionTicks),
+            startOver:!!forceStartOver,subtitleEnabled:!!intent.subtitleEnabled,
+            subtitleLanguage:intent.subtitleLanguage,
+            type:target.episode>0?'Episode':'Movie',intentKey:this.handoffKey()})){
+              this.closeDialog(); // Unmount the blocking modal BEFORE native playback starts.
+              return;
+            }
+        }catch(error){console.warn('Franchise Explorer: direct playback unavailable',error);}
+      }
+      const prefix=this.context.prefix||'';
+      // The standalone Franchises browser does not host Jellyfin Web's
+      // shortcuts. Transfer into its Home view and let the injected native
+      // bridge consume this expiring request without showing /details.
+      if(!/\/web(?:\/|$)/i.test(location.pathname||'') && typeof sessionStorage!=='undefined'){
+        try{
+          sessionStorage.setItem('fe-quickplay-v1',JSON.stringify({version:1,id:target.id,
+            created:Date.now(),positionTicks:Math.max(0,positionTicks),startOver:!!forceStartOver,
+            type:target.episode>0?'Episode':'Movie',homeOnly:true,returnUrl:location.href,
+            subtitleEnabled:!!intent.subtitleEnabled,subtitleLanguage:intent.subtitleLanguage}));
+          this.closeDialog();
+          location.assign(prefix+'/web/#/home');
+          return;
+        }catch(error){console.warn('Franchise Explorer: cross-page native playback unavailable',error);}
+      }
+      // If this Web client has no native playback integration, fail visibly
+      // without sending the viewer to a Details page or marking playback as
+      // verified. Restore the saved cursor rather than leaving it armed.
+      localStorage.removeItem(this.handoffKey());
+      try{await this.save(prev||{...state,playbackMode:'paused',sessionId:''});}catch(error){console.warn('Franchise Explorer: could not restore unplayed cursor',error);}
+      this.closeDialog();
+      throw new Error('Direct playback is unavailable on this Jellyfin client. Open Jellyfin Home and retry; no Details page was opened.');
+    }
+    makeState(row,queue,index=0){
+      const old=this.getState(row.id),oldKeys=Array.isArray(old?.queueKeys)?old.queueKeys:[];
+      const itemKey=key=>{
+        if(typeof key!=='string'||key.lastIndexOf(':')<1)return '';
+        const value=key.slice(key.lastIndexOf(':')+1);
+        return guid(value)?value.replace(/-/g,'').toLowerCase():'';
+      };
+      // Bundle/single-episode changes can replace reference IDs without changing
+      // the playable queue. Remap by position only for the entire identical item
+      // sequence; item ID lookup alone is ambiguous when an episode appears twice.
+      const remap=oldKeys.length>0 && oldKeys.length===queue.length &&
+        new Set(oldKeys).size===oldKeys.length && new Set(queue.map(q=>q.key)).size===queue.length &&
+        oldKeys.every((key,i)=>{
+          const item=itemKey(key),next=queue[i];
+          return item && guid(next.id) && item===String(next.id).replace(/-/g,'').toLowerCase() &&
+            itemKey(next.key)===item;
+        })?new Map(oldKeys.map((key,i)=>[key,queue[i].key])):null;
+      const currentKey=oldKeys[old?.index],restoredKey=remap?.get(currentKey)||currentKey;
+      const found=typeof restoredKey==='string'&&restoredKey?queue.findIndex(q=>q.key===restoredKey):-1,same=found>=0;
+      const restored=same?found:index;
+      return {
+        rowId:row.id,parentNodeId:row.parentNodeId||'',name:row.name,
+        itemId:queue[Math.max(0,restored)]?.id||'',sessionId:old?.sessionId||'',playbackMode:'paused',
+        index:Math.max(0,restored),total:queue.length,positionTicks:same?n(old.positionTicks):0,
+        completedKeys:(old?.completedKeys||[]).map(key=>remap?.get(key)||key).filter(key=>queue.some(q=>q.key===key)),queueKeys:queue.map(q=>q.key),queueLengths:queue.map(q=>q.runTimeTicks),
+        queueSourceItemIds:queue.map(q=>q.sourceItemId),queueSeasons:queue.map(q=>q.season),queueEpisodes:queue.map(q=>q.episode)
+      };
+    }
+    async resetHistory(row,queue){
+      if(!queue.length)throw new Error('This chronological list has no playable items.');
+      const state=this.makeState(row,queue,0);
+      state.index=0;state.itemId=queue[0].id;state.positionTicks=0;
+      state.sessionId='';state.playbackMode='paused';state.completedKeys=[];
+      state.pendingAutoAdvanceFromKey='';state.pendingAutoAdvanceToKey='';state.pendingAutoAdvanceUtc=null;
+      return this.save(state); // Only this user's franchise timeline; never Jellyfin watched flags.
+    }
+    async start(row,queue,sessionId,index,positionTicks=0,mode='playing',reset=false){
+      // Tell Jellyfin to queue the resolved items. State is changed only if
+      // the playback command succeeds.
+      await this.play(queue,sessionId,index,positionTicks);
+      const state=this.makeState(row,queue,index);
+      state.index=index;state.itemId=queue[index].id;state.positionTicks=positionTicks;
+      state.sessionId=sessionId;state.playbackMode=mode;
+      if(reset)state.completedKeys=[];
+      await this.save(state);
+      return state;
+    }
+    async replay(row,queue,index,sessionId,resetTimeline){
+      const previous=this.getState(row.id);
+      const old=this.makeState(row,queue,index);
+      if(resetTimeline){
+        old.completedKeys=old.completedKeys.filter(k=>queue.findIndex(x=>x.key===k)<index);
+        old.index=index;old.itemId=queue[index].id;old.positionTicks=0;old.sessionId=sessionId;
+        old.playbackMode='playing'; // queue automatically continues in chronology
+      }else{
+        old.playbackMode='replay'; // suppress chronological event tracking BEFORE playing
+        old.sessionId='';        // an independent replay never rewinds this timeline
+      }
+      // A first-time independent watch must not create a new 0%-complete
+      // timeline. Existing timelines are disarmed so they cannot advance.
+      if(resetTimeline||previous)await this.save(old);
+      try{
+        if(resetTimeline)await this.play(queue,sessionId,index,0);
+        else await this.play([queue[index]],sessionId,0,0);
+      }catch(e){
+        // Restore saved history if Jellyfin rejects the playback command.
+        if(previous)await this.save(previous);
+        throw e;
+      }
+    }
+    make(tag,cls,content){const el=document.createElement(tag);if(cls)el.className=cls;if(content!==undefined)el.textContent=content;return el;}
+    button(label,callback,cls='btn'){
+      const el=this.make('button',cls,label);el.type='button';el.addEventListener('click',()=>Promise.resolve(callback()).catch(e=>this.showError(e)));return el;
+    }
+    showError(error){
+      const message=error?.message||String(error);
+      console.error('Franchise Explorer timeline:',error);
+      window.FranchiseExplorerReportError?.('timeline',message);
+      const panel=this.activeDialog;
+      const feedback=panel?.querySelector('.timeline-feedback');
+      if(!feedback)return;
+      feedback.textContent=message;
+      setTimeout(()=>{if(this.activeDialog===panel&&feedback.textContent===message)feedback.textContent='';},5000);
+    }
+    progressLabel(percent){
+      return percent>0 && percent<0.1 ? percent.toFixed(2)+'%' :
+        percent>0 && percent<1 ? percent.toFixed(1)+'%' : Math.round(percent)+'%';
+    }
+    progressBar(percent){const outer=this.make('div','timeline-progress-track');outer.setAttribute('role','progressbar');outer.setAttribute('aria-valuenow',String(Math.round(percent)));
+      outer.setAttribute('aria-valuemin','0');outer.setAttribute('aria-valuemax','100');const inner=this.make('div','timeline-progress-fill');inner.style.width=Math.max(0,Math.min(100,percent))+'%';outer.append(inner);return outer;}
+    progress(rowId){
+      const state=this.getState(rowId);if(!state||!state.total)return 0;
+      const completed=new Set(state.completedKeys||[]);
+      const index=Math.max(0,Math.min(state.queueKeys?.length||0,state.index||0));
+      const currentKey=state.queueKeys?.[index];
+      const partial=state.playbackMode==='playing' && currentKey && !completed.has(currentKey)
+        ? Math.min(0.999,Math.max(0,(Number(state.positionTicks)||0)/
+          Math.max(1,Number(state.queueLengths?.[index])||1))) : 0;
+      return 100*Math.min(state.total,completed.size+partial)/state.total;
+    }
+    decorateFallback(tile,item,ref){
+      const data=item?.UserData||{};
+      const wholeSeries=item?.Type==='Series';
+      let percent=0,source='Jellyfin';
+      if(data.Played===true)percent=100;
+      else if(wholeSeries && Number(item.RecursiveItemCount)>0 && Number(data.UnplayedItemCount)>=0){
+        percent=100*(Number(item.RecursiveItemCount)-Number(data.UnplayedItemCount))/Number(item.RecursiveItemCount);
+      }else if(!wholeSeries && Number(item?.RunTimeTicks)>0){
+        percent=100*(Number(data.PlaybackPositionTicks)||0)/Number(item.RunTimeTicks);
+      }else if(ref.rangeMode==='Episodes'||ref.rangeMode==='Seasons')source='Timeline not started';
+      percent=Math.max(0,Math.min(100,percent));
+      const caption=this.make('span','timeline-card-caption',source+' · '+Math.round(percent)+'%');
+      tile.button.append(caption,this.progressBar(percent));
+      if(percent>=100){const badge=this.make('span','timeline-watched-badge','✓ Watched');tile.cover.append(badge);}
+    }
+    decorateMedia(tile,ref,row,item){
+      const possible=[...this.states.values()].filter(s=>s.queueKeys?.length && s.queueSourceItemIds?.length);
+      if(!possible.length){this.decorateFallback(tile,item,ref);return;}
+      const family=new Set();let parentId=row?.parentNodeId||'';
+      for(let i=0;i<30&&parentId;i++){
+        family.add(parentId);
+        parentId=this.context.catalog.nodes.find(n=>n.id===parentId)?.parentId||'';
+      }
+      const related=possible.filter(s=>family.has(s.parentNodeId)||s.rowId===row?.id)
+        .sort((a,b)=>new Date(b.updatedUtc||0)-new Date(a.updatedUtc||0));
+      // Older flat episode references may be grouped only for display. Match
+      // their original episode IDs without changing any saved playback keys.
+      const sourceIds=new Set((ref._episodeSources||[ref.itemId]).map(x=>String(x).replace(/-/g,'').toLowerCase()));
+      const sameItem=s=>(s.queueSourceItemIds||[]).some(x=>sourceIds.has(String(x).replace(/-/g,'').toLowerCase()));
+      const closest=related.find(s=>s.rowId===row?.id&&sameItem(s))||related.find(sameItem);
+      if(!closest){this.decorateFallback(tile,item,ref);return;}
+      const update=()=>{
+        const state=this.getState(closest.rowId)||closest;
+        const keys=[];
+        state.queueSourceItemIds?.forEach((source,i)=>{
+          if(!sourceIds.has(String(source).replace(/-/g,'').toLowerCase()))return;
+          if((ref.rangeMode==='Episodes'||ref.rangeMode==='Seasons')&&
+             !inRange({Id:state.queueKeys[i],ParentIndexNumber:state.queueSeasons?.[i],IndexNumber:state.queueEpisodes?.[i]},ref))return;
+          keys.push({key:state.queueKeys[i],index:i});
+        });
+        if(!keys.length)return;
+        const completed=new Set(state.completedKeys||[]);
+        const finished=keys.filter(k=>completed.has(k.key)).length;
+        const active=keys.find(k=>k.index===state.index && state.playbackMode==='playing' && !completed.has(k.key));
+        const partial=active ? Math.min(0.999,Math.max(0,(Number(state.positionTicks)||0)/
+          Math.max(1,Number(state.queueLengths?.[active.index])||1))) : 0;
+        const value=100*(finished+partial)/keys.length;
+        const caption=tile.button.querySelector('.timeline-card-caption');
+        if(caption)caption.textContent=finished+' of '+keys.length+' watched · '+Math.floor(value)+'% · '+state.name;
+        const bar=tile.button.querySelector('.timeline-progress-track');
+        if(bar){bar.setAttribute('aria-valuenow',String(Math.round(value)));
+          const fill=bar.querySelector('.timeline-progress-fill');if(fill)fill.style.width=value+'%';}
+        const badge=tile.cover.querySelector('.timeline-watched-badge');
+        if(badge)badge.hidden=finished!==keys.length;
+      };
+      const caption=this.make('span','timeline-card-caption','');
+      const bar=this.progressBar(0);
+      const badge=this.make('span','timeline-watched-badge','✓ Watched');badge.hidden=true;
+      tile.cover.append(badge);tile.button.append(caption,bar);
+      update();this.decorations??=[];this.decorations.push(update);
+    }
+    addControls(row,frame){
+      if(row.rowType!=='Timeline')return;
+      const controls=this.make('div','timeline-shelf-controls');
+      const btn=this.button('▶ Play chronological order',()=>this.openDialog(row),'btn btn-primary');
+      const details=this.button('☷ Episodes & progress',()=>this.openDialog(row));
+      const progress=this.make('div','timeline-mini-progress');
+      progress.dataset.rowId=row.id;const pct=this.progress(row.id);progress.textContent=this.progressLabel(pct)+' completed';
+      progress.append(this.progressBar(this.progress(row.id)));
+      controls.append(btn,details,progress);frame.shelf.insertBefore(controls,frame.track);
+    }
+    async openDialog(row,autoResume=false,action=''){
+      this.closeDialog();const mask=this.make('div','timeline-dialog-mask');mask.setAttribute('role','presentation');
+      const panel=this.make('section','timeline-dialog');panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+      panel.setAttribute('aria-label','Chronological playback for '+row.name);
+      const top=this.make('div','timeline-dialog-header');top.append(this.make('h2','',row.name),this.button('✕ Close',()=>this.closeDialog()));
+      const feedback=this.make('div','timeline-feedback','Resolving selected seasons and episodes…');
+      const summary=this.make('div','timeline-summary');const chooser=this.make('div','timeline-chooser');const list=this.make('div','timeline-entry-list');
+      panel.append(top,feedback,summary,chooser,list);mask.append(panel);document.body.append(mask);this.activeDialog=panel;
+      mask.addEventListener('click',e=>{if(e.target===mask)this.closeDialog();});
+      const trap=e=>{if(e.key==='Escape'){e.preventDefault();this.closeDialog();}};
+      mask.addEventListener('keydown',trap);panel.querySelector('button')?.focus();
+      try{
+        const {queue,warnings}=await this.resolve(row);if(this.activeDialog!==panel)return;
+        if(warnings.length){
+          const message=warnings.join(' · ');
+          feedback.textContent=message;
+          window.FranchiseExplorerReportError?.('timeline-warning',message);
+          setTimeout(()=>{if(this.activeDialog===panel&&feedback.textContent===message)feedback.textContent='';},5000);
+        }else feedback.textContent='';
+        if(action==='restart-history' && queue.length){
+          const agreed=await this.confirmAction('Restart the entire chronological history for '+row.name+'? All completed entries in THIS franchise timeline will be cleared. Jellyfin watched history will not change.','Restart history');
+          if(agreed){await this.resetHistory(row,queue);feedback.textContent='Chronological history restarted at the first item. Choose a playback device and select Play from beginning when ready.';}
+          else feedback.textContent='Chronological history was not changed.';
+        }
+        if(this.activeDialog!==panel)return;
+        const saved=this.getState(row.id),keys=new Set(saved?.completedKeys||[]);
+        summary.append(this.make('p','',queue.length+' playable movies/episodes · '+keys.size+' completed'));
+        summary.append(this.progressBar(queue.length?keys.size/queue.length*100:0));
+        if(!queue.length){list.append(this.make('div','shelf-empty','No playable items in this timeline. Check library permissions, episode ranges, and media availability.'));return;}
+        const sessionLabel=this.make('label','','Play on this Jellyfin device:');
+        const select=this.make('select','field timeline-device');select.setAttribute('aria-label','Choose a Jellyfin playback session');
+        chooser.append(sessionLabel,select);
+        let activeDevices=[];
+        try{activeDevices=await this.sessions();}
+        catch(e){
+          const message='Remote devices are unavailable; you can still choose this browser.';
+          feedback.textContent+=(feedback.textContent?' · ':'')+message;
+          window.FranchiseExplorerReportError?.('timeline-device',message+' '+(e.message||e));
+          const displayed=feedback.textContent;
+          setTimeout(()=>{if(this.activeDialog===panel&&feedback.textContent===displayed)feedback.textContent='';},5000);
+        }
+        if(this.activeDialog!==panel)return;
+        const localChoice=this.make('option','','This browser (local playback — recommended)');
+        localChoice.value='__local__';select.append(localChoice);
+        for(const s of activeDevices){
+          const supported=this.isRemoteCapable(s);
+          const description=(s.DeviceName||s.Client||'Device')+' · '+(s.UserName||'User');
+          const option=this.make('option','',description+(supported?'':' · Remote playback unavailable'));
+          option.value=s.Id;option.disabled=!supported;select.append(option);
+        }
+        select.value='__local__';
+        // The local web player needs no remote-control capability. Do not
+        // display alarming session warnings when the user selects local mode.
+        const startIndex=queue.findIndex(q=>q.key===saved?.queueKeys?.[saved?.index]);
+        const resumeIndex=startIndex>=0?startIndex:0;
+        const start=this.button('▶ Play from beginning',async()=>{
+          if(select.value==='__local__')return this.playHere(row,queue,0,0,true);
+          await this.start(row,queue,select.value,0,0,'playing',true);feedback.textContent='Jellyfin confirmed playback on the remote device; subsequent queue support varies.';
+        },'btn btn-primary');
+        const resume=this.button('↻ Resume timeline',async()=>{
+          if(select.value==='__local__')return this.playHere(row,queue,resumeIndex,n(saved?.positionTicks));
+          await this.start(row,queue,select.value,resumeIndex,n(saved?.positionTicks));feedback.textContent='Jellyfin confirmed playback on the remote device.';
+        });
+        // The local browser option is available even when remote control is disabled.
+
+        chooser.append(start,resume);
+        if(action==='restart-current'){
+          const restart=this.button('↻ Restart current viewing',async()=>{
+            const current=this.getState(row.id);
+            const currentIndex=queue.findIndex(q=>q.key===current?.queueKeys?.[current?.index]);
+            const from=currentIndex>=0?currentIndex:0;
+            if(!await this.confirmAction('Restart '+queue[from].label+' from the beginning? Your earlier chronological history will be kept.','Restart viewing'))return;
+            if(select.value==='__local__')return this.playHere(row,queue,from,0,false,false);
+            await this.start(row,queue,select.value,from,0,'playing',false);
+            feedback.textContent='Current viewing restarted at 0:00; earlier franchise progress was preserved.';
+          },'btn btn-primary');
+          chooser.prepend(restart);
+          feedback.textContent='Restart the current movie or episode from 0:00 while keeping the rest of your chronological history.';
+          restart.focus();
+        }
+        let chooseWatch=null;
+        if(action==='select'){
+          feedback.textContent='Choose any movie or episode below, then decide whether this viewing should count toward the chronological timeline.';
+          const choice=this.make('div','timeline-watch-choice');choice.hidden=true;
+          const question=this.make('p','','');
+          let selectedIndex=-1;
+          const watchOnly=this.button('Watch only · No franchise tracking',async()=>{
+            if(selectedIndex<0)return;
+            const index=selectedIndex;choice.hidden=true;
+            if(select.value==='__local__')return this.playHere(row,queue,index,0,false,true);
+            await this.replay(row,queue,index,select.value,false);
+            feedback.textContent='Independent viewing started; chronological history and cursor were preserved.';
+          },'btn btn-primary');
+          const watchTracked=this.button('Watch and track from here',async()=>{
+            if(selectedIndex<0)return;
+            const index=selectedIndex;
+            if(!await this.confirmAction('Continue the chronological timeline from '+queue[index].label+'? Later completed entries will be cleared in the franchise timeline only.','Watch and track'))return;
+            choice.hidden=true;
+            if(select.value==='__local__')return this.playHere(row,queue,index,0,true,false);
+            await this.replay(row,queue,index,select.value,true);
+            feedback.textContent='Timeline restarted from the selected item.';
+          });
+          const cancel=this.button('Cancel',()=>{choice.hidden=true;selectedIndex=-1;});
+          choice.append(question,watchOnly,watchTracked,cancel);chooser.append(choice);
+          chooseWatch=index=>{
+            selectedIndex=index;
+            question.textContent='Watch '+queue[index].label+' — should this viewing count toward franchise chronological progress? Jellyfin may still record its normal watched/resume history.';
+            choice.hidden=false;choice.scrollIntoView({block:'nearest'});watchOnly.focus();
+          };
+        }
+        if(autoResume){
+          // Dashboard's explicitly clicked Resume Timeline link.
+          void (select.value==='__local__'
+            ? this.playHere(row,queue,resumeIndex,n(saved?.positionTicks))
+            : this.start(row,queue,select.value,resumeIndex,n(saved?.positionTicks))).then(()=>{
+            if(this.activeDialog===panel) feedback.textContent='Jellyfin confirmed the resumed movie/episode is playing.';
+          }).catch(error=>this.showError(error));
+        }
+        queue.forEach((q,i)=>{
+          const done=keys.has(q.key),isCurrent=i===resumeIndex;
+          const line=this.make('div','timeline-entry');
+          const details=this.make('div','timeline-entry-text');details.append(this.make('strong','',`${i+1}. ${q.label}`),
+            this.make('small','',done?'✓ Completed in this timeline':isCurrent?'▶ Timeline position':'Not started'));
+          const act=this.make('div','timeline-entry-actions');
+          if(chooseWatch)act.append(this.button('▶ Watch…',()=>chooseWatch(i),'btn btn-primary'));
+          else {
+          const replay=this.button('Replay only',async()=>{
+            if(select.value==='__local__')return this.playHere(row,queue,i,0,false,true);
+            await this.replay(row,queue,i,select.value,false);
+            feedback.textContent='Jellyfin confirmed independent replay started. The chronological cursor and completed items were preserved.';
+          });
+          const reset=this.button('Restart timeline here',async()=>{
+            const okay=await this.confirmAction('Move this timeline back to '+q.label+'? Later entries will be marked unfinished in THIS timeline only.','Restart here');
+            if(!okay)return;
+            if(select.value==='__local__')return this.playHere(row,queue,i,0,true,false);
+            await this.replay(row,queue,i,select.value,true);
+            feedback.textContent='Jellyfin confirmed playback restarted here; remaining queue commands were sent.';
+          });
+          act.append(replay,reset);
+          }
+          line.append(details,act);
+          if(isCurrent && !done && q.runTimeTicks){
+            const partial=Math.min(100,100*n(saved?.positionTicks)/q.runTimeTicks);
+            if(partial>0){details.append(this.progressBar(partial));details.append(this.make('small','',Math.round(partial)+'% through this movie/episode'));}
+          }
+          if(done)line.classList.add('timeline-complete');list.append(line);
+        });
+      }catch(e){this.showError(e);}
+    }
+    closeDialog(){if(this.activeDialog){this.activeDialog.parentElement?.remove();this.activeDialog=null;}}
+    confirmAction(message,confirmLabel='Confirm'){
+      // Browser-native confirm() appears at the top of the browser, not in
+      // the middle of Jellyfin. Use a focused, fully modal in-page prompt.
+      return new Promise(resolve=>{
+        const mask=this.make('div','timeline-choice-confirm-mask');
+        mask.style.cssText='position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:16px;background:#06090cce;backdrop-filter:blur(3px)';
+        const dialog=this.make('section','timeline-choice-confirm');
+        dialog.setAttribute('role','alertdialog');dialog.setAttribute('aria-modal','true');
+        dialog.setAttribute('aria-label','Confirm chronological timeline action');
+        dialog.style.cssText='box-sizing:border-box;width:min(460px,100%);padding:24px;border:1px solid #657989;border-radius:12px;background:#202a35;color:#fff;box-shadow:0 20px 60px #000d;font:15px/1.5 system-ui,sans-serif';
+        const prompt=this.make('p','',message);prompt.style.margin='0 0 20px';
+        const buttons=this.make('div','');buttons.style.cssText='display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap';
+        const previous=document.activeElement;
+        const end=accepted=>{mask.remove();if(previous?.isConnected)previous.focus();resolve(accepted);};
+        const cancel=this.button('Cancel',()=>end(false));
+        const accept=this.button(confirmLabel,()=>end(true),'btn btn-primary');
+        // Match the home card's reset confirmation regardless of Jellyfin's
+        // global button styles (the embedded browser does not share its CSS).
+        const buttonStyle='box-sizing:border-box;min-height:43px;border:1px solid #607184;border-radius:8px;padding:9px 14px;background:#2b3643;color:#fff;font:600 14px system-ui,sans-serif;cursor:pointer';
+        cancel.style.cssText=buttonStyle;
+        accept.style.cssText=buttonStyle+';background:#0b9caf;border-color:#0b9caf;color:#03191c';
+        buttons.append(cancel,accept);dialog.append(prompt,buttons);mask.append(dialog);document.body.append(mask);
+        mask.addEventListener('click',event=>{if(event.target===mask)end(false);});
+        mask.addEventListener('keydown',event=>{
+          if(event.key==='Escape'){event.preventDefault();end(false);}
+          if(event.key==='Tab'){
+            const next=event.shiftKey?cancel:accept;
+            if(document.activeElement===next){event.preventDefault();(event.shiftKey?accept:cancel).focus();}
+          }
+        });
+        cancel.focus();
+      });
+    }
+    beginMonitoring(){
+      if(this.pollTimer)return;
+      this.pollTimer=setInterval(()=>void this.poll().catch(e=>console.debug('Timeline monitor:',e.message)),12000);
+    }
+    async poll(){
+      if(this.inflight||document.hidden)return;this.inflight=true;
+      try{
+        // The Jellyfin server-side PlaybackStart/Progress/Stopped listener owns
+        // authoritative timeline tracking. Web clients only read progress;
+        // they must not race the native event listener with stale PUT requests.
+        const states=await this.request('/FranchiseExplorer/TimelineState');
+        this.states=new Map((Array.isArray(states)?states:[]).map(x=>[x.rowId,x]));
+        for(const update of this.decorations||[])update();
+        document.querySelectorAll('.timeline-mini-progress[data-row-id]').forEach(el=>{
+          const p=this.progress(el.dataset.rowId);
+          el.firstChild.textContent=this.progressLabel(p)+' completed';
+          const fill=el.querySelector('.timeline-progress-fill');if(fill)fill.style.width=p+'%';
+        });
+      }catch(e){console.debug('Timeline status refresh:',e.message);}
+      finally{this.inflight=false;}
+    }
+
+  }
+  global.FranchiseTimeline = { TimelineManager, inRange, compareEpisode, rangeLabel };
+})(window);
