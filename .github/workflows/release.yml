@@ -1,0 +1,165 @@
+name: Publish experimental release (manual approval only)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version; must equal csproj Version'
+        required: true
+        default: '0.8.9.28'
+        type: string
+      confirm:
+        description: 'Type RELEASE_EXPERIMENTAL to publish'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: franchise-release
+  cancel-in-progress: false
+jobs:
+  ui-browser:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE_EXPERIMENTAL'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify requested release version before browser tests
+        working-directory: Jellyfin-Franchise-Explorer
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python3 scripts/check_version.py "$RELEASE_VERSION"
+      - name: Install Playwright and Chromium
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium firefox
+      - name: Validate browser UI before publishing
+        working-directory: Jellyfin-Franchise-Explorer
+        run: |
+          python3 scripts/test_media_ordering_browser.py
+          python3 scripts/test_artwork_image_loading_browser.py
+          python3 scripts/test_hierarchy_layout_browser.py
+          python3 scripts/test_automation_recovery_browser.py
+          python3 scripts/test_missing_media_display_browser.py
+          python3 scripts/test_recovery_attention_browser.py
+          python3 scripts/test_specific_episode_browser.py
+          python3 scripts/test_imdb_lists_episode_ui_browser.py
+          python3 scripts/test_episode_presentation_browser.py
+          python3 scripts/test_viewer_preferences_browser.py
+          python3 scripts/test_my_media_tile_browser.py
+          python3 scripts/test_my_media_tile_resize.py
+          python3 scripts/test_v085_native_card.py
+          python3 scripts/test_v085_card_progress.py
+          python3 scripts/test_v087_completion_handoff.py
+          python3 scripts/test_v088_completion_recovery.py
+          python3 scripts/test_v089_activation_browser.py
+          python3 scripts/test_v0891_response_casing_browser.py
+          python3 scripts/test_v0892_home_browser.py
+
+  publish:
+    needs: ui-browser
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE_EXPERIMENTAL'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Refuse duplicate GitHub releases before compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if gh release view "v${RELEASE_VERSION}" --json tagName --jq .tagName >/dev/null 2>&1; then
+            echo "::error::Release v${RELEASE_VERSION} already exists. Increase the project version and rerun with the new version. Existing releases are never overwritten."
+            exit 1
+          fi
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check source, tests and version
+        working-directory: Jellyfin-Franchise-Explorer
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 scripts/check_repo.py
+          python3 scripts/build_settings_page.py --check
+          node scripts/test_settings_core.js
+          node scripts/test_episode_formats.js
+          python3 scripts/check_repository_completeness.py
+          python3 scripts/smoke_tests.py
+          node scripts/test_autoadd.js
+          node scripts/test_autoadd_grouping.js
+          node scripts/test_autoadd_changes.js
+          node scripts/test_auto_franchises_exclusions.js
+          node scripts/test_auto_franchises_core_exclusions.js
+          node --check src/Jellyfin.Plugin.FranchiseExplorer/Web/franchise-my-media.js
+          node --check src/Jellyfin.Plugin.FranchiseExplorer/Web/franchise-timeline.js
+          python3 scripts/test_my_media_tile_static.py
+          node scripts/test_timeline_engine.js
+          node scripts/test_playback_subtitles.js
+          node scripts/test_v08916_jellyfin_subtitle_inheritance.js
+          node scripts/test_v089_arming.js
+          node scripts/test_v0891_timeline_json.js
+          python3 scripts/test_timeline_contract.py
+          python3 scripts/test_v089_activation_contract.py
+          python3 scripts/test_v0891_json_contract.py
+          python3 scripts/test_local_web_handoff_contract.py
+          python3 scripts/test_v0892_home_contract.py
+          python3 scripts/test_v0893_upgrade_contract.py
+          python3 scripts/test_v0894_tile_position_contract.py
+          python3 scripts/test_v0894_poster_orientation_contract.py
+          python3 scripts/test_v0895_release_contract.py
+          node scripts/test_v0897_qol.js
+          node scripts/test_v0899_home_actions.js
+          node scripts/test_v08911_direct_playback.js
+          node scripts/test_v08912_player_and_dialog.js
+          node scripts/test_v08913_home_return_and_filter.js
+          node scripts/test_v08915_home_direct_next.js
+          python3 scripts/test_v08916_language_and_cleanup.py
+          node scripts/test_v08918_error_notifications.js
+          node scripts/test_v08920_android_integrated.js
+          node scripts/test_v08920_android_queue.js
+          python3 scripts/check_version.py "$RELEASE_VERSION"
+      - name: Build release assembly
+        working-directory: Jellyfin-Franchise-Explorer
+        run: |
+          dotnet restore src/Jellyfin.Plugin.FranchiseExplorer/Jellyfin.Plugin.FranchiseExplorer.csproj
+          dotnet build src/Jellyfin.Plugin.FranchiseExplorer/Jellyfin.Plugin.FranchiseExplorer.csproj --no-restore -c Release
+          dotnet run --project tests/AutoAdd.Tests -c Release
+      - name: Package compiled DLL only
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          cd Jellyfin-Franchise-Explorer/src/Jellyfin.Plugin.FranchiseExplorer/bin/Release/net10.0
+          zip -j "$GITHUB_WORKSPACE/dist/franchise-explorer_${RELEASE_VERSION}.zip" Jellyfin.Plugin.FranchiseExplorer.dll
+          unzip -l "$GITHUB_WORKSPACE/dist/franchise-explorer_${RELEASE_VERSION}.zip"
+      - name: Publish experimental GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "v${RELEASE_VERSION}" "dist/franchise-explorer_${RELEASE_VERSION}.zip" \
+            --target "$GITHUB_SHA" \
+            --prerelease --title "Franchise Explorer ${RELEASE_VERSION} (EXPERIMENTAL)" \
+            --notes "UNFINISHED EXPERIMENTAL VERSION. Virtual franchises and experimental chronological playback; back up your server and plugin data. Native-client compatibility remains unverified."
+      - name: Generate Jellyfin catalog manifest from actual release ZIP
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 Jellyfin-Franchise-Explorer/scripts/publish_manifest.py \
+            --version "$RELEASE_VERSION" \
+            --archive "dist/franchise-explorer_${RELEASE_VERSION}.zip" \
+            --repository "$GITHUB_REPOSITORY"
+      - name: Commit and push catalog manifest
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json
+          git commit -m "catalog: publish experimental ${RELEASE_VERSION}"
+          git push origin HEAD:main

@@ -1,0 +1,110 @@
+name: Build and validate (no release)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate repository and web scripts
+        working-directory: Jellyfin-Franchise-Explorer
+        run: |
+          python3 scripts/check_repo.py
+          python3 scripts/build_settings_page.py --check
+          node scripts/test_settings_core.js
+          node scripts/test_episode_formats.js
+          python3 scripts/check_repository_completeness.py
+          python3 scripts/smoke_tests.py
+          node scripts/test_autoadd.js
+          node scripts/test_autoadd_grouping.js
+          node scripts/test_autoadd_changes.js
+          node scripts/test_auto_franchises_exclusions.js
+          node scripts/test_auto_franchises_core_exclusions.js
+          node --check src/Jellyfin.Plugin.FranchiseExplorer/Web/franchise-my-media.js
+          node --check src/Jellyfin.Plugin.FranchiseExplorer/Web/franchise-timeline.js
+          python3 scripts/test_my_media_tile_static.py
+          node scripts/test_timeline_engine.js
+          node scripts/test_playback_subtitles.js
+          node scripts/test_v08916_jellyfin_subtitle_inheritance.js
+          node scripts/test_v089_arming.js
+          node scripts/test_v0891_timeline_json.js
+          python3 scripts/test_timeline_contract.py
+          python3 scripts/test_v089_activation_contract.py
+          python3 scripts/test_v0891_json_contract.py
+          python3 scripts/test_local_web_handoff_contract.py
+          python3 scripts/test_v0892_home_contract.py
+          python3 scripts/test_v0893_upgrade_contract.py
+          python3 scripts/test_v0894_tile_position_contract.py
+          python3 scripts/test_v0894_poster_orientation_contract.py
+          python3 scripts/test_v0895_release_contract.py
+          node scripts/test_v0897_qol.js
+          node scripts/test_v0899_home_actions.js
+          node scripts/test_v08911_direct_playback.js
+          node scripts/test_v08912_player_and_dialog.js
+          node scripts/test_v08913_home_return_and_filter.js
+          python3 scripts/test_v08916_language_and_cleanup.py
+          node scripts/test_v08918_error_notifications.js
+          node scripts/test_v08920_android_integrated.js
+          node scripts/test_v08920_android_queue.js
+      - name: Restore and build Jellyfin 12.2 plugin
+        working-directory: Jellyfin-Franchise-Explorer
+        run: |
+          dotnet restore src/Jellyfin.Plugin.FranchiseExplorer/Jellyfin.Plugin.FranchiseExplorer.csproj
+          dotnet build src/Jellyfin.Plugin.FranchiseExplorer/Jellyfin.Plugin.FranchiseExplorer.csproj --no-restore -c Release
+          dotnet run --project tests/AutoAdd.Tests -c Release
+      - name: Upload build artifact (not a release)
+        uses: actions/upload-artifact@v6
+        with:
+          name: franchise-explorer-unverified-dll
+          path: Jellyfin-Franchise-Explorer/src/Jellyfin.Plugin.FranchiseExplorer/bin/Release/net10.0/Jellyfin.Plugin.FranchiseExplorer.dll
+          if-no-files-found: error
+          retention-days: 14
+  ui-browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium firefox
+      - name: Run native tile geometry tests
+        working-directory: Jellyfin-Franchise-Explorer
+        run: |
+          python3 scripts/test_timeline_browser.py
+          python3 scripts/test_settings_v9_browser.py
+          python3 scripts/test_specific_episode_browser.py
+          python3 scripts/test_imdb_lists_episode_ui_browser.py
+          python3 scripts/test_episode_presentation_browser.py
+          python3 scripts/test_viewer_preferences_browser.py
+          python3 scripts/test_media_ordering_browser.py
+          python3 scripts/test_artwork_image_loading_browser.py
+          python3 scripts/test_hierarchy_layout_browser.py
+          python3 scripts/test_automation_recovery_browser.py
+          python3 scripts/test_missing_media_display_browser.py
+          python3 scripts/test_recovery_attention_browser.py
+          python3 scripts/test_card_navigation_v081.py
+          python3 scripts/test_local_web_handoff.py
+          python3 scripts/test_autonext_browser.py
+          python3 scripts/test_home_recovery_browser.py
+          python3 scripts/test_my_media_tile_browser.py
+          python3 scripts/test_my_media_tile_resize.py
+          python3 scripts/test_v085_native_card.py
+          python3 scripts/test_v085_card_progress.py
+          python3 scripts/test_v087_completion_handoff.py
+          python3 scripts/test_v088_completion_recovery.py
+          python3 scripts/test_v089_activation_browser.py
+          python3 scripts/test_v0891_response_casing_browser.py
+          python3 scripts/test_v0892_home_browser.py
