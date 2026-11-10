@@ -9,6 +9,8 @@ p=argparse.ArgumentParser()
 p.add_argument('--version',required=True)
 p.add_argument('--archive',type=Path,required=True)
 p.add_argument('--repository',required=True)
+p.add_argument('--manifest',type=Path,default=Path('manifest.json'),
+    help='Catalog output path. Defaults to the current working directory.')
 a=p.parse_args()
 repo=Path(__file__).resolve().parents[2]
 identity=json.loads((repo/'project-identity.json').read_text(encoding='utf-8'))
@@ -19,9 +21,10 @@ if not a.archive.is_file() or a.archive.stat().st_size<1000:sys.exit('Release ar
 with ZipFile(a.archive) as archive:
     if archive.namelist()!=[identity['assemblyName']+'.dll']:sys.exit('Expected only the independent plugin DLL in archive')
 checksum=hashlib.md5(a.archive.read_bytes()).hexdigest() # Jellyfin manifest expects MD5
-manifest_file=repo/'manifest.json'
+manifest_file=a.manifest
 manifest=json.loads(manifest_file.read_text(encoding='utf-8'))
-if len(manifest)!=1 or manifest[0]['guid']!=identity['pluginId']:sys.exit('Foreign catalog detected')
+if len(manifest)!=1 or manifest[0]['guid']!=identity['pluginId'] or manifest[0]['owner']!='shuach613':
+    sys.exit('Foreign catalog detected')
 versions=manifest[0].setdefault('versions',[])
 if any(v['version']==a.version for v in versions):sys.exit('Release version already in catalog')
 versions.insert(0,{'version':a.version,'changelog':f'https://github.com/{a.repository}/releases/tag/v{a.version}','targetAbi':'12.0.0.0','sourceUrl':f'https://github.com/{a.repository}/releases/download/v{a.version}/{a.archive.name}','checksum':checksum,'timestamp':datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')})
