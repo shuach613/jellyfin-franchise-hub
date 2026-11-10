@@ -23,6 +23,7 @@ jobs:
           python3 scripts/check_version.py 0.1.0.0
           python3 scripts/build_settings_page.py --check
           python3 scripts/test_step3_feature_contracts.py
+          python3 scripts/test_step4_architecture_contract.py
           node scripts/test_feature_parity_fixture.js
           python3 scripts/test_full_library_row_contract.py
           node scripts/test_settings_core.js

@@ -3,7 +3,7 @@
 1. [x] Establish the independent GitHub repository and exact upstream baseline.
 2. [x] Establish independent plugin identity, versioning, script registration and an unpublished catalog.
 3. [x] Audit the original plugin and establish feature-parity tests.
-4. [ ] Design the unified franchise and playback architecture.
+4. [x] Design the unified franchise and playback architecture.
 5. [ ] Build the authoritative chronological watch-order engine.
 6. [ ] Implement reliable data persistence and migration.
 7. [ ] Implement bidirectional import/export compatibility with the original Explorer.
@@ -20,3 +20,5 @@
 18. [ ] Publish the production-ready v1.0 release.
 
 **Playback policy:** Franchise playback defaults to the saved chronological sequence. Filtered movies, whole-series, and other custom sessions must not silently modify chronological progress. **Compatibility policy:** The new plugin must import original Explorer exports and produce an export that the original importer can read, reporting unsupported new fields rather than discarding them silently.
+
+**Step 4 design artifact:** [Architecture](docs/architecture/README.md) · [Domain](docs/architecture/DOMAIN_MODEL.md) · [API](docs/architecture/API_V1.md) · [Persistence](docs/architecture/PERSISTENCE_MIGRATION.md) · [Acceptance](docs/architecture/ACCEPTANCE_TESTS.md). This phase defines contracts; implementation is in Steps 5–10.

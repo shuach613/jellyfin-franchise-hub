@@ -17,7 +17,7 @@ Franchise Hub is a personal, noncommercial derivative of [Gost1o1's Jellyfin Fra
 
 ## Development status
 
-Source code and experimental features are inherited unchanged except for identity, visible plugin naming and build/catalog safeguards. Existing API routes and internal namespaces remain temporarily unchanged to retain compatibility during the forthcoming refactor. **Chronological playback, automatic next-item playback and native-client behavior are not yet verified for production.**
+The runtime implementation is still the imported upstream behavior with Step 2 identity changes. Step 3 added a parity baseline, and Step 4 provides a **design-only** server-owned chronology architecture; new v1 endpoints, SQLite storage and selective sessions are not implemented yet. Existing API routes and internal namespaces remain temporarily unchanged to retain compatibility during the forthcoming refactor. **Chronological playback, automatic next-item playback and native-client behavior are not yet verified for production.**
 
 Do **not** install this development snapshot alongside the original Franchise Explorer. Their existing routes and browser state integrations still overlap; a safe migration path will be implemented in later steps. No upstream user configuration is automatically migrated by changing the plugin GUID.
 
@@ -27,6 +27,11 @@ Do **not** install this development snapshot alongside the original Franchise Ex
 - [Step 3 — source audit and risk register](docs/audit/STEP3_SOURCE_AUDIT.md)
 - [Step 3 — complete feature-parity matrix](docs/audit/FEATURE_PARITY_MATRIX.md)
 - [Step 3 — regression tests, fixtures and validation gaps](docs/audit/TEST_PLAN.md)
+- [Step 4 — unified franchise/playback architecture](docs/architecture/README.md)
+- [Step 4 — domain model and occurrence identities](docs/architecture/DOMAIN_MODEL.md)
+- [Step 4 — proposed versioned API](docs/architecture/API_V1.md)
+- [Step 4 — persistence and migration design](docs/architecture/PERSISTENCE_MIGRATION.md)
+- [Step 4 — architecture decisions and acceptance scenarios](docs/architecture/DECISIONS.md)
 
 ## Legal
 
