@@ -21,6 +21,6 @@ Franchise Hub now has a distinct Jellyfin plugin GUID, DLL/assembly name, inject
 
 ## Status
 
-This is a **frozen upstream baseline only**. The original plugin GUID, product identity, build/release references and Jellyfin injection identifiers are intentionally unchanged until **Step 2 — Independent Plugin Identity and Versioning**. Do not install the upstream plugin and this unmodified snapshot as separate active plugins on the same Jellyfin instance.
+Step 1 is preserved as the original file-exact baseline on `baseline/upstream-v0.8.9.28`. Step 2 introduces the separate Franchise Hub identity and development metadata on `develop`. The new GUID is not a data migration: existing upstream configuration and user progress are **not** automatically copied, and source API routes/local browser state still overlap.
 
-No independent production release has been created. A future development branch and release process will add the hardening work planned for this project.
+**Do not install the original plugin and this development build together.** Installation migration, full regression coverage and a production release are later roadmap steps. The Jellyfin catalog intentionally contains no published versions, and the independent release workflow fails closed until Step 16.
