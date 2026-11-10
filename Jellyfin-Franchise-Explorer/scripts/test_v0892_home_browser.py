@@ -189,7 +189,7 @@ with sync_playwright() as p:
         assert tile.locator(".fe-settings-menu").is_visible()
         assert page.url == before_menu, "Clicking the three dots must not open browsing"
         assert "Open Franchises" in tile.locator(".fe-settings-menu").inner_text()
-        assert "configurationpage?name=Franchise%20Explorer" in tile.locator(".fe-settings-link").last.get_attribute("href")
+        assert "configurationpage?name=Franchise%20Hub" in tile.locator(".fe-settings-link").last.get_attribute("href")
         page.locator("#next").click()
         assert not tile.locator(".fe-settings-menu").is_visible()
 
