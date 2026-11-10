@@ -31,6 +31,6 @@ assert 'Use Jellyfin preference (' in config
 assert 'subtitleLanguagePreferenceKey()' in browse
 
 assert 'Unassigned Movies & TV Shows' in browse
-assert 'jellyfin-franchise-explorer-my-media-v08915' in service, 'new release must retire previous Injector script'
+assert 'LegacyScriptIds = Array.Empty<string>()' in service, 'Independent plugin must not unregister upstream scripts'
 
 print('v0.8.9.22 subtitle-language, localized home tile, and unassigned-link safety contracts passed.')

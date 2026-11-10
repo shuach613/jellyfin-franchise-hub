@@ -9,10 +9,10 @@ startup=(project/'Web/HomeTileRegistrationService.cs').read_text()
 csproj=(project/'Jellyfin.Plugin.FranchiseExplorer.csproj').read_text()
 checks={
  'Script embedded': 'EmbeddedResource Include="Web/franchise-my-media.js"' in csproj,
- 'Stable Jellyfin plugin GUID': '6bc7820b-7c6d-4e64-a139-dfb90b8d6f42' in (project/'Plugin.cs').read_text(),
+ 'Stable Jellyfin plugin GUID': '4f0ea498-68ea-42ce-a010-bd35b182299d' in (project/'Plugin.cs').read_text(),
  'Match My Media heading': 'My Media' in script,
  'No existing media change': 'placeTile(container,tile)' in script and 'removeChild(ref)' not in script,
- 'Idempotent injection': '__franchiseExplorerMyMediaTileLoaded' in script,
+ 'Idempotent injection': '__franchiseHubMyMediaTileLoaded' in script,
  'Supports base path': r"pathname.match(/^(.*?)\/web" in script,
  'Plugin registration via interface': 'IPluginServiceRegistrator' in startup and 'RegisterScript' in startup,
  'Optional registration': 'TryRegister()' in startup and 'catch (Exception ex)' in startup,

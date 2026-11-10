@@ -9,7 +9,7 @@ BROWSE = (PROJECT / "Configuration/browsePage.html").read_text(encoding="utf-8")
 README = (ROOT.parent / "README.md").read_text(encoding="utf-8")
 CS = (PROJECT / "Jellyfin.Plugin.FranchiseExplorer.csproj").read_text(encoding="utf-8")
 
-assert "<Version>0.8.9.28</Version>" in CS
+assert "<Version>0.1.0.0</Version>" in CS
 assert "Continue Your Franchises" in JS
 for marker in (
     "sessionStorage.getItem", "sessionStorage.setItem", "MutationObserver",
@@ -26,10 +26,10 @@ assert "completedKeys" in JS
 assert "queueKeys" in JS
 assert "SeriesName" in JS
 assert "Images/Thumb" in JS
-assert "configurationpage?name=Franchise%20Explorer" in JS
+assert "configurationpage?name=Franchise%20Hub" in JS
 assert 'id="fe-config-settings"' in BROWSE
-assert "configurationpage?name=Franchise%20Explorer" in BROWSE
-assert "src=\"docs/Gost1o1-logo.png\"" in README
+assert "configurationpage?name=Franchise%20Hub" in BROWSE
+assert "Franchise Hub" in README
 for path in (
     "docs/Gost1o1-logo.png",
     "docs/screenshots/user-guide/00-franchise-explorer-full-page.png",
@@ -37,6 +37,6 @@ for path in (
 ):
     file = ROOT.parent / path
     assert file.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", path
-    assert path in README, f"README must reference current image: {path}"
+    assert path in (ROOT.parent / "docs/UPSTREAM_README.md").read_text(), f"Archived upstream README should reference original image: {path}"
 
 print("v0.8.9.2 home/menu/README static contract passed.")
