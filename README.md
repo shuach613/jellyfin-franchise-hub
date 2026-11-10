@@ -24,6 +24,9 @@ Do **not** install this development snapshot alongside the original Franchise Ex
 - [Upstream attribution and frozen-baseline verification](UPSTREAM.md)
 - [Original upstream README (archived verbatim)](docs/UPSTREAM_README.md)
 - [Planned roadmap](ROADMAP.md)
+- [Step 3 — source audit and risk register](docs/audit/STEP3_SOURCE_AUDIT.md)
+- [Step 3 — complete feature-parity matrix](docs/audit/FEATURE_PARITY_MATRIX.md)
+- [Step 3 — regression tests, fixtures and validation gaps](docs/audit/TEST_PLAN.md)
 
 ## Legal
 

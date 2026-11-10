@@ -2,7 +2,7 @@
 
 1. [x] Establish the independent GitHub repository and exact upstream baseline.
 2. [x] Establish independent plugin identity, versioning, script registration and an unpublished catalog.
-3. [ ] Audit the original plugin and establish feature-parity tests.
+3. [x] Audit the original plugin and establish feature-parity tests.
 4. [ ] Design the unified franchise and playback architecture.
 5. [ ] Build the authoritative chronological watch-order engine.
 6. [ ] Implement reliable data persistence and migration.
