@@ -54,8 +54,8 @@ requirements = {
     "artwork / subtitles / per-user authorization": [
         ("Api/FranchiseArtworkController.cs", ["DetectImage", "MaxImageBytes", "VideoPreview", "AllowedSlots", "RequiresElevation"]),
         ("Api/FranchisePlaybackPreferencesController.cs", ["OwnsDevice", "PlaybackPreferencesRequest", "subtitleStreamIndex"]),
-        ("Web/PlaybackSubtitlePolicy.cs", ["PlaybackSubtitlePolicyStore", "OwnsDevice", "SubtitleLanguagePreference"]),
-        ("Api/FranchiseTimelineController.cs", ["TryUser", "PathFor(user"]),
+        ("Web/PlaybackSubtitlePolicy.cs", ["PlaybackSubtitlePolicyStore", "OwnsDevice", "SelectIndex"]),
+        ("Api/FranchiseTimelineController.cs", ["TryIdentity", "PathFor(user"]),
     ],
 }
 checked = 0
