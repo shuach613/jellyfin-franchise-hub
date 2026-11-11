@@ -72,6 +72,21 @@ internal static class FranchiseHubPersistenceTests
                 "repeat resolve must preserve occurrence IDs and snapshot digest");
             Check(store.ReadProgress(user, franchise, order) is null,
                 "resolving previews must never create watch progress");
+            var changedWarnings = new ChronologyResolution
+            {
+                FranchiseId = franchise, OrderId = order,
+                QueueSnapshotId = input.QueueSnapshotId, OrderRevision = input.OrderRevision,
+                Items = input.Items,
+                Warnings = [new ChronologyWarning("missing_or_forbidden", refA.ToString("D"),
+                    "A reference is missing or no longer accessible.")]
+            };
+            var warningSnapshot = store.RegisterSnapshot(changedWarnings, user);
+            Check(warningSnapshot.QueueSnapshotId != first.QueueSnapshotId,
+                "changed warnings must create a distinct immutable snapshot ID");
+            Check(store.ReadSnapshot(user, first.QueueSnapshotId)?.Warnings.Count == 0 &&
+                  store.ReadSnapshot(user, warningSnapshot.QueueSnapshotId)?.Warnings.Count == 1,
+                "existing immutable snapshot remains unchanged after permission warnings change");
+
 
             var changed = Preview(franchise, order, Guid.NewGuid(), 12,
                 Item(refB, mediaB, "movie:imdb:ttb", 0),
@@ -110,6 +125,13 @@ internal static class FranchiseHubPersistenceTests
             var art = Path.Combine(folder, "franchise-artwork", "assets");
             Directory.CreateDirectory(art);
             File.WriteAllBytes(Path.Combine(art, "synthetic.png"), [1, 2, 3, 4]);
+            var oldStage = Path.Combine(folder, "legacy-staging");
+            File.WriteAllText(Path.Combine(oldStage, "original-plugin-configuration.xml"),
+                "<PluginConfiguration><NavigationLabel>Original Explorer</NavigationLabel></PluginConfiguration>");
+            var stagedArt = Path.Combine(oldStage, "franchise-artwork", "assets");
+            Directory.CreateDirectory(stagedArt);
+            File.WriteAllBytes(Path.Combine(stagedArt, "old-image.webp"), [5, 6, 7, 8]);
+
             var node = new FranchiseNode
             {
                 Id = franchise.ToString("D"), NodeType = "Franchise",
@@ -145,6 +167,11 @@ internal static class FranchiseHubPersistenceTests
                     "backup includes current configuration");
                 Check(backup.GetEntry("franchise-artwork/assets/synthetic.png") is not null,
                     "backup includes artwork");
+                Check(backup.GetEntry("legacy-explorer-artwork/assets/old-image.webp") is not null,
+                    "backup includes staged original Explorer artwork");
+                Check(backup.GetEntry("original-explorer-configuration.xml") is not null,
+                    "backup includes staged original Explorer configuration without applying it");
+
                 Check(backup.GetEntry("backup-manifest.json") is not null,
                     "backup includes checksums manifest");
             }
