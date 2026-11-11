@@ -39,6 +39,7 @@ await MediaRecoveryTests.Run();
 await RecoveryFailureRegressionTests.Run();
 await ConfigurationCommitTests.Run();
 await ChronologicalWatchOrderTests.Run();
+await FranchiseHubPersistenceTests.Run();
 
 if (args.Contains("--live"))
 {
