@@ -38,6 +38,7 @@ await AutomationRuntimeTests.Run();
 await MediaRecoveryTests.Run();
 await RecoveryFailureRegressionTests.Run();
 await ConfigurationCommitTests.Run();
+await ChronologicalWatchOrderTests.Run();
 
 if (args.Contains("--live"))
 {
