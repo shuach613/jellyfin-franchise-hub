@@ -32,6 +32,7 @@ Do **not** install this development snapshot alongside the original Franchise Ex
 - [Step 4 — proposed versioned API](docs/architecture/API_V1.md)
 - [Step 4 — persistence and migration design](docs/architecture/PERSISTENCE_MIGRATION.md)
 - [Step 4 — architecture decisions and acceptance scenarios](docs/architecture/DECISIONS.md)
+- [Step 5 — server-side chronological queue resolver and preview API](docs/architecture/STEP5_WATCH_ORDER_ENGINE.md)
 
 ## Legal
 

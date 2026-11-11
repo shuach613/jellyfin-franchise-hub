@@ -92,3 +92,8 @@ A franchise is the top-level virtual franchise node, not a native Jellyfin colle
 Step 5 implements sequence resolution; 6 transactional storage/migration; 7 compatibility adapter; 8 verified event state; 9 Jellyfin Web adapter; 10 selective sessions. Steps 11–13 put the shared API in the UI. Steps 14–17 harden, verify, package and safely migrate.
 
 See DOMAIN_MODEL.md, API_V1.md, PERSISTENCE_MIGRATION.md, DECISIONS.md, and ACCEPTANCE_TESTS.md. The design manifest is contracts/v1/architecture.json and is checked by scripts/test_step4_architecture_contract.py.
+
+
+## Step 5 implementation
+
+The resolver and authenticated read-only preview API are implemented; see STEP5_WATCH_ORDER_ENGINE.md. Runtime playback remains on the inherited code until Steps 6–9.

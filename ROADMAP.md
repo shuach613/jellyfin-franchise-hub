@@ -4,7 +4,7 @@
 2. [x] Establish independent plugin identity, versioning, script registration and an unpublished catalog.
 3. [x] Audit the original plugin and establish feature-parity tests.
 4. [x] Design the unified franchise and playback architecture.
-5. [ ] Build the authoritative chronological watch-order engine.
+5. [x] Build the authoritative chronological watch-order engine.
 6. [ ] Implement reliable data persistence and migration.
 7. [ ] Implement bidirectional import/export compatibility with the original Explorer.
 8. [ ] Develop verified playback sessions and progress tracking.
