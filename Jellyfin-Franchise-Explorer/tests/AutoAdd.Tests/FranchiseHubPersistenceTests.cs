@@ -104,6 +104,20 @@ internal static class FranchiseHubPersistenceTests
                 Item(repeatedRef, mediaA, "movie:imdb:tta", 1)), user);
             Check(repeated.Items[0].OccurrenceId != repeated.Items[1].OccurrenceId,
                 "same media duplicated on two placements must be distinguishable");
+            try
+            {
+                store.RegisterSnapshot(Preview(franchise, order, Guid.NewGuid(), 13,
+                    Item(refA, mediaA, "movie:imdb:same-provider", 0),
+                    Item(refA, mediaB, "movie:imdb:same-provider", 1)), user);
+                throw new Exception("ambiguous provider identity was accepted");
+            }
+            catch (ChronologyResolutionException ex)
+            {
+                Check(ex.Code == "ambiguous_media_identity",
+                    "two physical files sharing one logical slot identity require explicit review");
+            }
+            Check(store.IntegrityCheck(), "rejected ambiguous snapshot did not corrupt transactions");
+
 
             // A new instance against the same DB should read the same registry.
             var restart = new FranchiseHubStateStore(folder);
