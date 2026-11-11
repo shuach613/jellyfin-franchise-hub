@@ -42,6 +42,10 @@ public sealed class LegacyTimelineMigrationService
         bool AlreadyImported, int ImportedRecords, int PendingReview,
         string BackupName, string SourceDigest);
 
+    public sealed record LegacyRollbackResult(bool AlreadyRolledBack,
+        int DeletedJourneyRows, string BackupName, string SourceDigest);
+
+
     private sealed record LegacyFile(Guid UserId, Guid RowId, string Relative,
         string JsonText, byte[] Bytes, string Digest,
         FranchiseTimelineController.TimelineProgress Progress);
@@ -328,6 +332,100 @@ public sealed class LegacyTimelineMigrationService
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
+
+    /// <summary>
+    /// Reopen the completed private backup and verify that every archive entry
+    /// is exactly covered by its SHA-256 manifest before SQL import begins.
+    /// Never extracts archive paths to disk.
+    /// </summary>
+    private static void VerifyBackup(string archivePath, string sourceDigest)
+    {
+        using var zip = ZipFile.OpenRead(archivePath);
+        var manifestEntry = zip.GetEntry("backup-manifest.json")
+            ?? throw new InvalidDataException("Backup manifest is missing.");
+        if (manifestEntry.Length <= 0 || manifestEntry.Length > 1024 * 1024)
+            throw new InvalidDataException("Backup manifest has invalid size.");
+        using var manifestStream = manifestEntry.Open();
+        using var manifest = JsonDocument.Parse(manifestStream);
+        var root = manifest.RootElement;
+        if (root.GetProperty("schemaVersion").GetInt32() != 1 ||
+            root.GetProperty("sourceDigest").GetString() != sourceDigest)
+            throw new InvalidDataException("Backup manifest is for a different migration.");
+        var files = root.GetProperty("files");
+        if (files.ValueKind != JsonValueKind.Object || files.EnumerateObject().Count() > 100000)
+            throw new InvalidDataException("Backup manifest contains invalid file records.");
+        var expected = files.EnumerateObject().ToDictionary(
+            x => x.Name, x => x.Value.GetString() ?? "", StringComparer.Ordinal);
+        if (expected.Count + 1 != zip.Entries.Count)
+            throw new InvalidDataException("Backup contains unlisted or duplicate entries.");
+        long total = 0;
+        foreach (var (name, hash) in expected)
+        {
+            if (string.IsNullOrEmpty(name) || name.StartsWith("/", StringComparison.Ordinal) ||
+                name.Split('/').Any(p => p is "" or "." or "..") || name.Contains('\\'))
+                throw new InvalidDataException("Backup contains an unsafe entry name.");
+            var entry = zip.GetEntry(name) ?? throw new InvalidDataException("Backup archive is incomplete.");
+            if (entry.Length < 0) throw new InvalidDataException("Invalid backup entry length.");
+            total = checked(total + entry.Length);
+            if (total > MaxBackupBytes + 32L * 1024 * 1024)
+                throw new InvalidDataException("Backup is larger than the approved limit.");
+            using var stream = entry.Open();
+            var checksum = Convert.ToHexString(SHA256.HashData(stream));
+            if (!string.Equals(checksum, hash, StringComparison.Ordinal))
+                throw new InvalidDataException("Backup checksum verification failed.");
+        }
+    }
+
+    /// <summary>
+    /// Roll back a migration only while every migrated journey remains at
+    /// state_version=0 and has no active lease. Snapshots and backup ZIPs
+    /// remain untouched; old JSON/config/art are never overwritten.
+    /// </summary>
+    public LegacyRollbackResult Rollback(string sourceDigest)
+    {
+        if (sourceDigest.Length != 64)
+            throw new ArgumentException("A complete migration source digest is required.", nameof(sourceDigest));
+        lock (Gate)
+        {
+            return _store.InTransaction((db, tx) =>
+            {
+                var importId = FranchiseHubStateStore.SqlValue(db, tx,
+                    "SELECT import_id FROM legacy_import_journal WHERE source_digest=$digest",
+                    ("$digest", sourceDigest));
+                if (importId is null)
+                    return new LegacyRollbackResult(true, 0, "", sourceDigest);
+                var backup = FranchiseHubStateStore.SqlValue(db, tx,
+                    "SELECT backup_file FROM legacy_import_journal WHERE import_id=$id",
+                    ("$id", importId)) ?? "";
+                var unsafeRows = FranchiseHubStateStore.SqlValue(db, tx, @"
+ SELECT COUNT(*) FROM journey_progress WHERE migration_id=$id
+ AND (state_version<>0 OR active_owner_lease IS NOT NULL)",
+                    ("$id", importId));
+                if (unsafeRows != "0")
+                    throw new InvalidOperationException(
+                        "Migrated journeys have changed after import; rollback requires a manual review.");
+                var affected = int.Parse(FranchiseHubStateStore.SqlValue(db, tx,
+                    "SELECT COUNT(*) FROM journey_progress WHERE migration_id=$id",
+                    ("$id", importId)) ?? "0",
+                    System.Globalization.CultureInfo.InvariantCulture);
+                FranchiseHubStateStore.SqlExec(db, tx, @"
+ DELETE FROM journey_completed WHERE EXISTS(
+ SELECT 1 FROM journey_progress p WHERE p.migration_id=$id
+ AND p.user_id=journey_completed.user_id
+ AND p.franchise_id=journey_completed.franchise_id
+ AND p.order_id=journey_completed.order_id)",
+                    ("$id", importId));
+                FranchiseHubStateStore.SqlExec(db, tx,
+                    "DELETE FROM journey_progress WHERE migration_id=$id", ("$id", importId));
+                FranchiseHubStateStore.SqlExec(db, tx,
+                    "DELETE FROM legacy_progress_records WHERE import_id=$id", ("$id", importId));
+                FranchiseHubStateStore.SqlExec(db, tx,
+                    "DELETE FROM legacy_import_journal WHERE import_id=$id", ("$id", importId));
+                return new LegacyRollbackResult(false, affected, backup, sourceDigest);
+            });
+        }
+    }
+
     /// <summary>
     /// Apply is explicit and synchronous. All original staged JSON is immutable,
     /// a checksummed ZIP is created first, and the SQL change is one transaction.
@@ -353,6 +451,7 @@ public sealed class LegacyTimelineMigrationService
             if (already is not null)
                 return new LegacyMigrationResult(true, 0, 0, already, source.Digest);
             var backup = CreateBackup(source, configurationBackup);
+            VerifyBackup(Path.Combine(_root, "franchise-hub-state", "migration-backups", backup), source.Digest);
             var importId = Id(Guid.NewGuid());
             // One atomic transaction. Interrupted SQL never partially seeds users.
             return _store.InTransaction((db, tx) =>
