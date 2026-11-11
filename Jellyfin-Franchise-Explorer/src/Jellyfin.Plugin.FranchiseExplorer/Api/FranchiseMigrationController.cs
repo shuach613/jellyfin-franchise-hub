@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
@@ -65,11 +68,12 @@ public sealed class FranchiseMigrationController(
         }
         catch (InvalidDataException) { return SafeJson(422, new { code = "invalid_legacy_staging", message = "The staged files require repair." }); }
         catch (IOException) { return SafeJson(503, new { code = "migration_storage_unavailable" }); }
+        catch (SqliteException) { return SafeJson(503, new { code = "migration_database_unavailable" }); }
     }
 
     [HttpPost("apply")]
     [RequestSizeLimit(4096)]
-    public IActionResult Apply([FromBody] ApplyMigrationRequest? request)
+    public async Task<IActionResult> Apply([FromBody] ApplyMigrationRequest? request, CancellationToken cancellationToken)
     {
         if (!IsAdmin()) return Forbid();
         var plugin = Plugin.Instance;
@@ -77,28 +81,38 @@ public sealed class FranchiseMigrationController(
         if (request is null || request.SchemaVersion != 1 ||
             !request.ConfirmBackupAndImport || request.ExpectedSourceDigest.Length != 64)
             return SafeJson(400, new { code = "explicit_confirmation_required" });
-        if (request.ExpectedConfigurationRevision != plugin.Configuration.ConfigurationRevision)
-            return SafeJson(409, new { code = "stale_revision", message = "The franchise configuration changed." });
+        // Serialize against administration edits so a changed franchise hierarchy
+        // cannot be used to map progress in the middle of a migration.
+        await FranchiseConfigurationGate.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Does not modify legacy JSON, old plugin data, current XML or media.
-            // Writes only a new private ZIP backup and new state DB transaction.
-            var result = migration.Apply(plugin.Configuration,
-                request.ExpectedSourceDigest, plugin.ReadConfigurationBackup());
-            return SafeJson(200, new
+            if (request.ExpectedConfigurationRevision != plugin.Configuration.ConfigurationRevision)
+                return SafeJson(409, new { code = "stale_revision", message = "The franchise configuration changed." });
+            try
             {
-                schemaVersion = 1, result.AlreadyImported, result.ImportedRecords,
-                result.PendingReview, result.BackupName, result.SourceDigest
-            });
+                // Does not modify legacy JSON, old plugin data, current XML or media.
+                // Writes only a new private ZIP backup and one new-state DB transaction.
+                var result = migration.Apply(plugin.Configuration,
+                    request.ExpectedSourceDigest, plugin.ReadConfigurationBackup());
+                return SafeJson(200, new
+                {
+                    schemaVersion = 1, result.AlreadyImported, result.ImportedRecords,
+                    result.PendingReview, result.BackupName, result.SourceDigest
+                });
+            }
+            catch (InvalidOperationException)
+            {
+                return SafeJson(409, new { code = "migration_conflict",
+                    message = "Migration preview or existing progress changed; review before retrying." });
+            }
+            catch (InvalidDataException)
+            {
+                return SafeJson(422, new { code = "invalid_legacy_staging",
+                    message = "Migration files are invalid or exceed allowed limits." });
+            }
+            catch (IOException) { return SafeJson(503, new { code = "migration_storage_unavailable" }); }
+            catch (SqliteException) { return SafeJson(503, new { code = "migration_database_unavailable" }); }
         }
-        catch (InvalidOperationException)
-        {
-            return SafeJson(409, new { code = "migration_conflict", message = "Migration preview or existing progress changed; review before retrying." });
-        }
-        catch (InvalidDataException)
-        {
-            return SafeJson(422, new { code = "invalid_legacy_staging", message = "Migration files are invalid or exceed allowed limits." });
-        }
-        catch (IOException) { return SafeJson(503, new { code = "migration_storage_unavailable" }); }
+        finally { FranchiseConfigurationGate.Gate.Release(); }
     }
 }
