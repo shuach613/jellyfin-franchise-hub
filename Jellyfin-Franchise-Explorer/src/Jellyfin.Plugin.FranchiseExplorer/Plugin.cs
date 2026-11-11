@@ -25,6 +25,11 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public static Plugin? Instance { get; private set; }
 
+    /// <summary>Copy the current Franchise Hub XML into a private migration backup;
+    /// this accessor never accepts untrusted paths or edits the original.</summary>
+    internal byte[] ReadConfigurationBackup()
+        => File.Exists(ConfigurationFilePath) ? File.ReadAllBytes(ConfigurationFilePath) : Array.Empty<byte>();
+
     public override string Name => "Franchise Hub";
 
     public override Guid Id => PluginId;

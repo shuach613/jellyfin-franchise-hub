@@ -18,7 +18,8 @@ namespace Jellyfin.Plugin.FranchiseExplorer.Api;
 [Authorize]
 [Route("FranchiseHub/v1")]
 public sealed class FranchiseWatchOrderController(
-    ILibraryManager library, IUserManager userManager, IWatchOrderResolver resolver)
+    ILibraryManager library, IUserManager userManager, IWatchOrderResolver resolver,
+    FranchiseHubStateStore stateStore)
     : ControllerBase
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -73,8 +74,11 @@ public sealed class FranchiseWatchOrderController(
         try
         {
             var catalog = new JellyfinChronologyViewerCatalog(library, viewer);
-            var result = await resolver.ResolveAsync(config, franchiseId, userId, catalog, cancellationToken)
+            var preview = await resolver.ResolveAsync(config, franchiseId, userId, catalog, cancellationToken)
                 .ConfigureAwait(false);
+            // Step 6 stores only permission-filtered immutable snapshots and durable
+            // identities. Watch progress remains owned by the legacy player until Step 8.
+            var result = stateStore.RegisterSnapshot(preview, userId);
             if (result.Items.Count == 0)
                 return SafeJson(422, new { schemaVersion = 1, code = "unplayable_selection",
                     message = "This chronological order has no accessible playable items.", warnings = result.Warnings });
