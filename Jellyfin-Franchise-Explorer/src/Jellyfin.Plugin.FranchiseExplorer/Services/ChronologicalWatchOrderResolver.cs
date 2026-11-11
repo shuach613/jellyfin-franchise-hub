@@ -38,6 +38,7 @@ public sealed class ChronologicalWatchOrderResolver : IWatchOrderResolver
         PluginConfiguration config, Guid franchiseId, Guid authenticatedUserId,
         IChronologyViewerCatalog viewerCatalog, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(viewerCatalog);
         if (franchiseId == Guid.Empty || authenticatedUserId == Guid.Empty)
