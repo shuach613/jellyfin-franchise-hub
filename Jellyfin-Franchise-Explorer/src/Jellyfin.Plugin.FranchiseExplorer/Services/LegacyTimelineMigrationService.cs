@@ -63,7 +63,11 @@ public sealed class LegacyTimelineMigrationService
 
     private CheckedSource ReadStaged()
     {
-        var folder = Path.Combine(_root, "legacy-staging", "timeline-progress");
+        var stagingRoot = Path.Combine(_root, "legacy-staging");
+        if (Directory.Exists(stagingRoot) &&
+            (File.GetAttributes(stagingRoot) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidDataException("Staging root cannot be a symlink.");
+        var folder = Path.Combine(stagingRoot, "timeline-progress");
         if (!Directory.Exists(folder))
             return new CheckedSource { Files = [], Digest = Sha([]) };
         if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0)
@@ -261,26 +265,54 @@ public sealed class LegacyTimelineMigrationService
                     AddZip(zip, "existing-franchise-hub-configuration.xml", existingConfiguration);
                     hashes["existing-franchise-hub-configuration.xml"] = Sha(existingConfiguration);
                 }
-                var art = Path.Combine(_root, "franchise-artwork");
+                // Preserve both currently installed Franchise Hub artwork and
+                // copies of Explorer artwork staged for eventual Step 7 import.
+                // Walk one directory at a time: symlinks are rejected, never
+                // followed while recursively enumerating untrusted staging.
                 long total = source.Files.Sum(x => (long)x.Bytes.Length);
-                if (Directory.Exists(art))
+                void IncludeArtwork(string root, string prefix)
                 {
-                    if ((File.GetAttributes(art) & FileAttributes.ReparsePoint) != 0)
-                        throw new InvalidDataException("Artwork folder is a symlink.");
-                    foreach (var file in Directory.EnumerateFiles(art, "*", SearchOption.AllDirectories))
+                    if (!Directory.Exists(root)) return;
+                    void Walk(string current)
                     {
-                        if (!SafeFile(file)) throw new InvalidDataException("Artwork contains an unsafe file.");
-                        var info = new FileInfo(file);
-                        total = checked(total + info.Length);
-                        if (total > MaxBackupBytes) throw new InvalidDataException("Backup exceeds allowed size.");
-                        var relative = Path.GetRelativePath(art, file).Replace('\\', '/');
-                        if (relative.Split('/').Any(part => part is "." or ".."))
-                            throw new InvalidDataException("Invalid artwork path.");
-                        var bytes = File.ReadAllBytes(file);
-                        var entry = "franchise-artwork/" + relative;
-                        AddZip(zip, entry, bytes);
-                        hashes[entry] = Sha(bytes);
+                        if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                            throw new InvalidDataException("Artwork staging contains a symlink.");
+                        foreach (var path in Directory.EnumerateFileSystemEntries(current))
+                        {
+                            var attrs = File.GetAttributes(path);
+                            if ((attrs & FileAttributes.ReparsePoint) != 0)
+                                throw new InvalidDataException("Artwork staging contains a symlink.");
+                            if ((attrs & FileAttributes.Directory) != 0) { Walk(path); continue; }
+                            var length = new FileInfo(path).Length;
+                            total = checked(total + length);
+                            if (total > MaxBackupBytes) throw new InvalidDataException("Backup exceeds allowed size.");
+                            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                            if (relative.Split('/').Any(part => part is "." or ".."))
+                                throw new InvalidDataException("Unsafe artwork path.");
+                            var bytes = File.ReadAllBytes(path);
+                            if (bytes.LongLength != length) throw new IOException("Artwork changed during backup.");
+                            var entry = prefix + "/" + relative;
+                            AddZip(zip, entry, bytes);
+                            hashes[entry] = Sha(bytes);
+                        }
                     }
+                    Walk(root);
+                }
+                IncludeArtwork(Path.Combine(_root, "franchise-artwork"), "franchise-artwork");
+                IncludeArtwork(Path.Combine(_root, "legacy-staging", "franchise-artwork"),
+                    "legacy-explorer-artwork");
+
+                var stagedXmlPath = Path.Combine(_root, "legacy-staging",
+                    "original-plugin-configuration.xml");
+                if (File.Exists(stagedXmlPath))
+                {
+                    if (!SafeFile(stagedXmlPath))
+                        throw new InvalidDataException("Original configuration cannot be a symlink.");
+                    var oldXml = File.ReadAllBytes(stagedXmlPath);
+                    if (oldXml.Length is 0 or > 16 * 1024 * 1024)
+                        throw new InvalidDataException("Original configuration exceeds allowed size.");
+                    AddZip(zip, "original-explorer-configuration.xml", oldXml);
+                    hashes["original-explorer-configuration.xml"] = Sha(oldXml);
                 }
                 var manifest = JsonSerializer.Serialize(new
                 {
