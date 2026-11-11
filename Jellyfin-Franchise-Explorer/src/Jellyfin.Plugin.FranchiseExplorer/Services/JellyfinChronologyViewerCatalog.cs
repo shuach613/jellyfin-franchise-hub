@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.FranchiseExplorer.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
