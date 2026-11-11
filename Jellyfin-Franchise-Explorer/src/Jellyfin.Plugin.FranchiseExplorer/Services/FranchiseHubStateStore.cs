@@ -35,6 +35,20 @@ public sealed class FranchiseHubStateStore
     private static string Id(Guid id) => id.ToString("D");
     private static long Now() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    // Include the entire viewer-visible preview (including warnings, current
+    // durations and metadata) in the immutable snapshot identity. Step 5's
+    // original ID alone intentionally omitted mutable warning details.
+    private static Guid SnapshotIdentity(ChronologyResolution preview)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            "franchise-hub/snapshot/v1/" + preview.QueueSnapshotId.ToString("D") + "/" +
+            JsonSerializer.Serialize(preview, Json)));
+        digest[6] = (byte)((digest[6] & 0x0F) | 0x50);
+        digest[8] = (byte)((digest[8] & 0x3F) | 0x80);
+        var hex = Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant();
+        return Guid.ParseExact($"{hex[..8]}-{hex.Substring(8, 4)}-{hex.Substring(12, 4)}-{hex.Substring(16, 4)}-{hex.Substring(20, 12)}", "D");
+    }
+
     private static SqliteCommand Cmd(SqliteConnection db, SqliteTransaction? tx, string sql, params (string, object?)[] args)
     {
         var command = db.CreateCommand();
@@ -242,7 +256,7 @@ CREATE TABLE IF NOT EXISTS legacy_progress_records(
         {
             FranchiseId = preview.FranchiseId, OrderId = preview.OrderId,
             OrderRevision = preview.OrderRevision,
-            QueueSnapshotId = preview.QueueSnapshotId, Items = items,
+            QueueSnapshotId = SnapshotIdentity(preview), Items = items,
             Warnings = preview.Warnings
         };
         var json = JsonSerializer.Serialize(result, Json);
