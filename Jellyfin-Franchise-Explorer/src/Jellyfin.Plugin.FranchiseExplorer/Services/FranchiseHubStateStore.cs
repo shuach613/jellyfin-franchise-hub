@@ -194,6 +194,16 @@ CREATE TABLE IF NOT EXISTS legacy_progress_records(
             preview.QueueSnapshotId == Guid.Empty || preview.OrderRevision < 0)
             throw new ArgumentException("Expected a viewer-bound, read-only canonical preview.");
         if (preview.Items.Count > 25000) throw new ArgumentException("Snapshot exceeds size limit.");
+        // If two different physical files share the same logical provider key
+        // in one slot (for example alternate episode cuts), ordinal assignment
+        // can change when permissions change. Require explicit disambiguation
+        // instead of swapping the user's stored occurrence identity.
+        var ambiguous = preview.Items.GroupBy(x => (x.SlotId, x.LogicalMediaKey))
+            .Any(g => g.Select(x => x.JellyfinItemId).Distinct().Skip(1).Any());
+        if (ambiguous)
+            throw new ChronologyResolutionException("ambiguous_media_identity",
+                "Two different playable files share one chronological identity; review the timeline references.");
+
         using var db = Open();
         using var tx = db.BeginTransaction();
         var f = Id(preview.FranchiseId); var o = Id(preview.OrderId); var user = Id(viewerId);

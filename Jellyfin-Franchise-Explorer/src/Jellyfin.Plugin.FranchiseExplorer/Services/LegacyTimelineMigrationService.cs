@@ -167,8 +167,10 @@ public sealed class LegacyTimelineMigrationService
         var snapshotRevision = FranchiseHubStateStore.SqlValue(db, tx,
             @"SELECT MAX(revision) FROM sequence_snapshots WHERE order_id=$o AND viewer_user_id=$u",
             ("$o", Id(file.RowId)), ("$u", Id(file.UserId)));
-        if (!long.TryParse(snapshotRevision, out var revision))
-            return new(root, file.RowId, 0, null, [], "No current user-bound resolved queue snapshot exists yet.");
+        if (!long.TryParse(snapshotRevision, out var revision) ||
+            revision != config.ConfigurationRevision)
+            return new(root, file.RowId, 0, null, [],
+                "No viewer-bound queue snapshot exists for the current configuration revision.");
         var order = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         // Legacy references alone can be ambiguous. Only an exact (slotId,
         // physical itemId) pair with one occurrence in this user's current

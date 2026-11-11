@@ -90,7 +90,7 @@ public sealed class FranchiseWatchOrderController(
             {
                 "not_found" => 404,
                 "invalid_request" => 400,
-                "ambiguous_primary_order" or "invalid_primary_order" => 409,
+                "ambiguous_primary_order" or "invalid_primary_order" or "ambiguous_media_identity" => 409,
                 "chronology_not_configured" or "too_many_items" or "too_many_references" => 422,
                 "library_unavailable" or "library_too_large" => 503,
                 _ => 422
