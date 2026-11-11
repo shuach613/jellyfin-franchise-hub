@@ -178,6 +178,47 @@ internal static class FranchiseHubPersistenceTests
             var retry = migration.Apply(config, preview.SourceDigest, backupXml);
             Check(retry.AlreadyImported, "repeated migration is idempotent");
 
+            // Rollback must not discard subsequent viewer activity. Simulate
+            // a newer progress version that Step 8 will produce after playback.
+            var dbFile = Path.Combine(folder, "franchise-hub-state", "state.sqlite3");
+            using (var db = new SqliteConnection("Data Source=" + dbFile))
+            {
+                db.Open();
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = "UPDATE journey_progress SET state_version=2 WHERE user_id=$id";
+                cmd.Parameters.AddWithValue("$id", user.ToString("D"));
+                Check(cmd.ExecuteNonQuery() == 1, "test state version bump");
+            }
+            try
+            {
+                migration.Rollback(preview.SourceDigest);
+                throw new Exception("rollback must reject changed user progress");
+            }
+            catch (InvalidOperationException) { }
+            Check(store.ReadProgress(user, franchise, order)?.StateVersion == 2,
+                "rejected rollback cannot alter newer playback progress");
+            using (var db = new SqliteConnection("Data Source=" + dbFile))
+            {
+                db.Open();
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = "UPDATE journey_progress SET state_version=0 WHERE user_id=$id";
+                cmd.Parameters.AddWithValue("$id", user.ToString("D"));
+                Check(cmd.ExecuteNonQuery() == 1, "reset synthetic test state version");
+            }
+            var rollback = migration.Rollback(preview.SourceDigest);
+            Check(!rollback.AlreadyRolledBack && rollback.DeletedJourneyRows == 1 &&
+                  store.ReadProgress(user, franchise, order) is null,
+                "confirmed rollback removes only the imported progress record");
+            Check(File.Exists(zip) && File.ReadAllText(legacyPath) == oldJson,
+                "rollback never deletes its backup or mutates legacy JSON");
+            Check(migration.Rollback(preview.SourceDigest).AlreadyRolledBack,
+                "rollback is idempotent");
+            var reapplied = migration.Apply(config, preview.SourceDigest, backupXml);
+            Check(!reapplied.AlreadyImported && reapplied.ImportedRecords == 1 &&
+                  store.ReadProgress(user, franchise, order)?.CursorOccurrenceId == first.Items[1].OccurrenceId,
+                "reimport after a safe rollback restores exact historical cursor");
+
+
             // New separate user record with the same row but NO per-user
             // immutable resolved queue => retain it pending_review instead
             // of falsely claiming it was watched.
