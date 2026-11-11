@@ -16,6 +16,9 @@ public sealed class FranchiseNode
     /// <summary>Chronological Auto Add presentation: Bundles or Individual. Older configurations retain bundles.</summary>
     public string EpisodeFormat { get; set; } = "Bundles";
 
+    /// <summary>Step 5: optional explicit canonical chronological row. Empty is safe for legacy XML.</summary>
+    public string PrimaryChronologyRowId { get; set; } = string.Empty;
+
     public string Id { get; set; } = Guid.NewGuid().ToString("D");
     public string ParentId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
