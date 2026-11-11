@@ -19,6 +19,8 @@
     <PackageReference Include="Jellyfin.Controller" Version="12.2.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <!-- New Franchise Hub-only SQLite store; packaging transitive runtime dependencies is gated at Step 16. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageReference Include="Jellyfin.Model" Version="12.2.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
