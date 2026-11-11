@@ -347,9 +347,10 @@ public sealed class LegacyTimelineMigrationService
                     }
                     else pending++;
                     FranchiseHubStateStore.SqlExec(db, tx, @"INSERT INTO legacy_progress_records
- (source_digest,user_id,row_id,raw_sha256,raw_json,status,review_reason,import_id,imported_utc)
- VALUES($id,$user,$row,$sha,$json,$status,$reason,$import,$now)",
-                        ("$id", Sha(Encoding.UTF8.GetBytes(file.Relative + "|" + file.Digest))),
+ (record_id,source_digest,user_id,row_id,raw_sha256,raw_json,status,review_reason,import_id,imported_utc)
+ VALUES($id,$digest,$user,$row,$sha,$json,$status,$reason,$import,$now)",
+                        ("$id", Sha(Encoding.UTF8.GetBytes(importId + "|" + file.Relative + "|" + file.Digest))),
+                        ("$digest", Sha(Encoding.UTF8.GetBytes(file.Relative + "|" + file.Digest))),
                         ("$user", Id(file.UserId)), ("$row", Id(file.RowId)),
                         ("$sha", file.Digest), ("$json", file.JsonText),
                         ("$status", status), ("$reason", reason),

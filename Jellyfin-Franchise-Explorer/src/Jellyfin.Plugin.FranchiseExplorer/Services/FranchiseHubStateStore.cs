@@ -147,18 +147,19 @@ CREATE TABLE IF NOT EXISTS legacy_import_journal(
  import_id TEXT PRIMARY KEY, source_digest TEXT NOT NULL UNIQUE, backup_file TEXT NOT NULL,
  imported_records INTEGER NOT NULL, pending_records INTEGER NOT NULL, applied_utc INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS legacy_progress_records(
- source_digest TEXT PRIMARY KEY, user_id TEXT NOT NULL, row_id TEXT NOT NULL,
+ record_id TEXT PRIMARY KEY, source_digest TEXT NOT NULL, user_id TEXT NOT NULL, row_id TEXT NOT NULL,
  raw_sha256 TEXT NOT NULL, raw_json TEXT NOT NULL, status TEXT NOT NULL,
  review_reason TEXT NULL, import_id TEXT NOT NULL, imported_utc INTEGER NOT NULL,
+ UNIQUE(import_id,source_digest),
  FOREIGN KEY(import_id) REFERENCES legacy_import_journal(import_id));
 ");
                 Exec(db, tx, "INSERT INTO schema_migrations(version,checksum,applied_utc) VALUES(1,$h,$now)",
-                    ("$h", Hash("franchise-hub-sqlite-schema-v1")), ("$now", Now()));
+                    ("$h", Hash("franchise-hub-sqlite-schema-v1-beta2")), ("$now", Now()));
                 Exec(db, tx, "PRAGMA user_version=1;");
                 tx.Commit();
             }
             var checksum = Scalar(db, null, "SELECT checksum FROM schema_migrations WHERE version=1");
-            if (checksum != Hash("franchise-hub-sqlite-schema-v1"))
+            if (checksum != Hash("franchise-hub-sqlite-schema-v1-beta2"))
                 throw new InvalidOperationException("Franchise Hub SQLite schema checksum is not recognized.");
             if (Scalar(db, null, "PRAGMA quick_check;") != "ok")
                 throw new InvalidOperationException("Franchise Hub SQLite integrity check failed.");
