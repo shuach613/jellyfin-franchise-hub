@@ -34,6 +34,13 @@ public sealed class FranchiseMigrationController(
         public long ExpectedConfigurationRevision { get; set; }
         public bool ConfirmBackupAndImport { get; set; }
     }
+    public sealed class RollbackMigrationRequest
+    {
+        public int SchemaVersion { get; set; } = 1;
+        public string SourceDigest { get; set; } = string.Empty;
+        public long ExpectedConfigurationRevision { get; set; }
+        public bool ConfirmRollback { get; set; }
+    }
     private bool IsAdmin()
         => Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var id) &&
             userManager.GetUserById(id)?.HasPermission(PermissionKind.IsAdministrator) == true;
@@ -115,4 +122,41 @@ public sealed class FranchiseMigrationController(
         }
         finally { FranchiseConfigurationGate.Gate.Release(); }
     }
+
+    [HttpPost("rollback")]
+    [RequestSizeLimit(4096)]
+    public async Task<IActionResult> Rollback([FromBody] RollbackMigrationRequest? request, CancellationToken cancellationToken)
+    {
+        if (!IsAdmin()) return Forbid();
+        var plugin = Plugin.Instance;
+        if (plugin is null) return SafeJson(503, new { code = "plugin_unavailable" });
+        if (request is null || request.SchemaVersion != 1 ||
+            !request.ConfirmRollback || request.SourceDigest.Length != 64)
+            return SafeJson(400, new { code = "explicit_confirmation_required" });
+        await FranchiseConfigurationGate.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (request.ExpectedConfigurationRevision != plugin.Configuration.ConfigurationRevision)
+                return SafeJson(409, new { code = "stale_revision", message = "The franchise configuration changed." });
+            try
+            {
+                var result = migration.Rollback(request.SourceDigest);
+                return SafeJson(200, new
+                {
+                    schemaVersion = 1, result.AlreadyRolledBack,
+                    result.DeletedJourneyRows, result.BackupName, result.SourceDigest,
+                    legacySourcesUnchanged = true
+                });
+            }
+            catch (InvalidOperationException)
+            {
+                return SafeJson(409, new { code = "rollback_conflict",
+                    message = "Migrated progress changed after import; manual review is required." });
+            }
+            catch (IOException) { return SafeJson(503, new { code = "migration_storage_unavailable" }); }
+            catch (SqliteException) { return SafeJson(503, new { code = "migration_database_unavailable" }); }
+        }
+        finally { FranchiseConfigurationGate.Gate.Release(); }
+    }
+
 }
